@@ -95,12 +95,27 @@ def save_master_emails(new_emails):
     return len(combined) - len(existing)
 
 # PROXY LIST - loaded from environment variable (set in GitHub Secrets)
+# Strip trailing slashes — DDGS and requests both reject proxy URLs ending in /
 _proxy_env = os.environ.get('PROXY_LIST', '')
-PROXY_LIST = [p.strip() for p in _proxy_env.split(',') if p.strip()]
+PROXY_LIST = [p.strip().rstrip('/') for p in _proxy_env.split(',') if p.strip()]
 
 # GITHUB TOKENS - loaded from environment variable (set in GitHub Secrets)
 _token_env = os.environ.get('GITHUB_TOKENS', '')
 GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
+
+def print_startup_diagnostics():
+    print("=" * 60)
+    print("DIAGNOSTICS:")
+    print("  PROXY_LIST set  : " + ("YES - " + str(len(PROXY_LIST)) + " proxies" if PROXY_LIST else "NO - searches will use GitHub IP (DDG will block)"))
+    if PROXY_LIST:
+        # Print first proxy with password masked
+        p = PROXY_LIST[0]
+        parts = p.split('@')
+        masked = parts[0].split(':')[0] + ':****@' + parts[1] if len(parts) == 2 else p[:20] + '...'
+        print("  First proxy     : " + masked)
+    print("  DDG regions     : " + str(DDG_REGIONS))
+    print("  Batch           : " + str(BATCH))
+    print("=" * 60)
 
 # ============================================
 # FIND EMAILS
@@ -185,7 +200,10 @@ def search_google(keyword, num_results=25, retry=3):
                 time.sleep(random.uniform(2, 4))
         time.sleep(random.uniform(1, 2))
 
-    print("  Found " + str(len(all_results)) + " websites across " + str(len(DDG_REGIONS)) + " regions")
+    if len(all_results) == 0:
+        print("  WARNING: 0 results returned — proxy may be blocked or PROXY_LIST empty")
+    else:
+        print("  Found " + str(len(all_results)) + " websites across " + str(len(DDG_REGIONS)) + " regions")
     return all_results
 
 # ============================================
@@ -360,9 +378,7 @@ def daily_scrape():
     print("Daily Target: 750-1000 READER emails")
     print("Date: " + datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     print("=" * 60)
-    print("Proxies : " + str(len(PROXY_LIST)) + " configured")
-    print("Regions : " + str(len(DDG_REGIONS)) + " DDG regions active")
-    print("=" * 60)
+    print_startup_diagnostics()
 
     keywords = [
         # ---- USA ----
