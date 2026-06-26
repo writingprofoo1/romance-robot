@@ -27,6 +27,9 @@ TRACKER_FILE = "last_run.json"
 VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 
+# 7 DDG regions - each returns different results for the same keyword
+DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en', 'za-en', 'ie-en', 'nz-en']
+
 def load_visited_urls():
     if not os.path.exists(VISITED_URLS_FILE):
         return set()
@@ -119,27 +122,32 @@ def clean_emails(email_list):
     return clean_list
 
 # ============================================
-# SEARCH
+# MULTI-REGION SEARCH
 # ============================================
 
-def search_google(keyword, num_results=20, retry=3):
+def search_google(keyword, num_results=25, retry=3):
     print("  Searching: " + keyword)
-    results = []
-    attempt = 0
+    all_results = []
+    seen = set()
 
-    while attempt < retry:
-        try:
-            with DDGS() as ddgs:
-                for r in ddgs.text(keyword, max_results=num_results):
-                    results.append(r['href'])
-            break
-        except Exception as e:
-            attempt += 1
-            print("  Retry " + str(attempt) + "/" + str(retry) + " -- " + str(e))
-            time.sleep(random.uniform(3, 7))
+    for region in DDG_REGIONS:
+        attempt = 0
+        while attempt < retry:
+            try:
+                with DDGS() as ddgs:
+                    for r in ddgs.text(keyword, max_results=num_results, region=region):
+                        url = r['href']
+                        if url not in seen:
+                            seen.add(url)
+                            all_results.append(url)
+                break
+            except Exception as e:
+                attempt += 1
+                time.sleep(random.uniform(2, 4))
+        time.sleep(random.uniform(1, 2))
 
-    print("  Found " + str(len(results)) + " websites")
-    return results
+    print("  Found " + str(len(all_results)) + " websites across " + str(len(DDG_REGIONS)) + " regions")
+    return all_results
 
 def get_random_user_agent():
     ua = UserAgent()
@@ -244,14 +252,14 @@ def analyze_emails(email_list):
         percent = (reader_count / total) * 100
         print("\n" + "=" * 60)
         print("EMAIL QUALITY REPORT:")
-        print("  Total emails: " + str(total))
-        print("  Reader-looking emails: " + str(reader_count) + " (" + str(round(percent, 1)) + "%)")
+        print("  Total emails      : " + str(total))
+        print("  Reader emails     : " + str(reader_count) + " (" + str(round(percent, 1)) + "%)")
         if percent > 70:
-            print("  Excellent - mostly readers!")
+            print("  Rating: Excellent - mostly readers!")
         elif percent > 50:
-            print("  Good - can improve")
+            print("  Rating: Good - can improve")
         else:
-            print("  Needs better keywords")
+            print("  Rating: Needs better keywords")
         print("=" * 60)
 
 # ============================================
@@ -265,8 +273,8 @@ def daily_scrape():
     print("Daily Target: 750-1000 READER emails")
     print("Date: " + datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     print("=" * 60)
-    print("Proxies: " + str(len(PROXY_LIST)) + " configured")
-    print("Tokens : " + str(len(GITHUB_TOKENS)) + " configured")
+    print("Proxies : " + str(len(PROXY_LIST)) + " configured")
+    print("Regions : " + str(len(DDG_REGIONS)) + " DDG regions active")
     print("=" * 60)
 
     keywords = [
@@ -344,6 +352,15 @@ def daily_scrape():
         "Irish romance readers",
         "romance book club Ireland",
         "romance books Ireland",
+        # New Countries
+        "Singapore romance readers",
+        "Malaysia romance readers",
+        "Philippines romance readers",
+        "India romance readers",
+        "Caribbean romance readers",
+        "Jamaica romance readers",
+        "Trinidad romance readers",
+        "Pakistan romance readers",
         # Reader Communities (Global)
         "goodreads romance reviews",
         "booktok romance recommendations",
@@ -395,6 +412,53 @@ def daily_scrape():
         "dark romance readers",
         "forbidden romance readers",
         "age gap romance readers",
+        # Subgenre-Specific (NEW)
+        "paranormal romance readers",
+        "regency romance readers",
+        "military romance readers",
+        "billionaire romance readers",
+        "small town romance readers",
+        "highland romance readers",
+        "mafia romance readers",
+        "reverse harem romance readers",
+        "sports romance readers",
+        "rockstar romance readers",
+        "office romance readers",
+        "romantic suspense readers",
+        "shifter romance readers",
+        "vampire romance readers",
+        "fantasy romance readers",
+        "cozy romance readers",
+        "beach read romance fans",
+        "omegaverse romance readers",
+        # Year-Based (NEW)
+        "romance readers 2025",
+        "romance book club 2025",
+        "romance book recommendations 2025",
+        "best romance books 2025",
+        "romance reading list 2025",
+        "romance readers 2024",
+        "romance book club 2024",
+        "romance book recommendations 2024",
+        # Platform-Specific (NEW)
+        "kindle unlimited romance readers",
+        "romance arc readers",
+        "romance advance readers copy",
+        "bookstagram romance community",
+        "romance readers reddit",
+        "romance readers facebook group",
+        "romance book haul",
+        "romance books TBR",
+        "romance beta readers",
+        # Newsletter/Subscription (NEW)
+        "romance newsletter subscribers",
+        "romance book subscription box",
+        "romance arc team",
+        "romance reading challenge 2025",
+        "romance bingo readers",
+        "spicy book recommendations",
+        "steamy book club members",
+        "dark romance book club",
     ]
 
     # Batch slicing for GitHub Actions (splits keywords into 4 daily chunks)
@@ -403,7 +467,7 @@ def daily_scrape():
         start = (BATCH - 1) * batch_size
         end = start + batch_size if BATCH < 4 else len(keywords)
         keywords = keywords[start:end]
-        print("GitHub Actions mode - Batch " + str(BATCH) + ": keywords " + str(start + 1) + " to " + str(end))
+        print("GitHub Actions - Batch " + str(BATCH) + ": keywords " + str(start + 1) + " to " + str(end))
 
     # Sleep settings: tighter in CI, relaxed locally
     INTER_URL_SLEEP = (0.5, 1.5) if IS_GITHUB_ACTIONS else (3, 6)
@@ -416,11 +480,13 @@ def daily_scrape():
 
     visited_urls = load_visited_urls()
     print("Tracking: " + str(len(visited_urls)) + " URLs already visited (will skip)")
+    print("Keywords : " + str(len(keywords)) + " active")
+    print("=" * 60)
 
     for idx, keyword in enumerate(keywords):
         print("\n[" + str(idx + 1) + "/" + str(len(keywords)) + "] " + keyword)
 
-        urls = search_google(keyword, num_results=150, retry=3)
+        urls = search_google(keyword, num_results=25, retry=3)
         total_websites += len(urls)
 
         for url in urls:
@@ -444,66 +510,4 @@ def daily_scrape():
 
         if (idx + 1) % 5 == 0:
             print("\n--- Progress: " + str(len(all_emails)) + " emails so far ---")
-            save_visited_urls(visited_urls)
-
-        if (idx + 1) % 10 == 0:
-            print("\n--- Cooling down... ---")
-            time.sleep(random.uniform(*COOLDOWN_SLEEP))
-        else:
-            time.sleep(random.uniform(*KEYWORD_SLEEP))
-
-    save_visited_urls(visited_urls)
-
-    all_emails = clean_emails(all_emails)
-    all_emails = list(set(all_emails))
-
-    analyze_emails(all_emails)
-
-    new_email_count = save_master_emails(all_emails)
-
-    filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + ".txt"
-    with open(filename, 'w') as f:
-        f.write("# ROMANCE READER EMAILS - " + datetime.now().strftime('%B %d, %Y') + "\n")
-        f.write("# Today new emails: " + str(len(all_emails)) + "\n")
-        f.write("# New additions to master list: " + str(new_email_count) + "\n")
-        f.write("#" + "=" * 50 + "\n\n")
-        for email in all_emails:
-            f.write(email + '\n')
-
-    save_run_date()
-
-    print("\n" + "=" * 60)
-    print("FINAL STATISTICS:")
-    print("  Reader emails found today : " + str(len(all_emails)))
-    print("  New additions to master   : " + str(new_email_count))
-    print("  Websites visited          : " + str(total_websites - skipped_websites))
-    print("  Skipped (seen before)     : " + str(skipped_websites))
-    print("  Saved to                  : " + filename)
-    print("=" * 60)
-
-    if len(all_emails) < 400:
-        print("LOW: Try enabling more keywords")
-    elif len(all_emails) < 750:
-        print("GOOD: Over 400 - heading toward 750+")
-    else:
-        print("TARGET REACHED! 750-1000 emails daily")
-    print("=" * 60)
-
-    return all_emails
-
-# ============================================
-# START
-# ============================================
-
-if __name__ == "__main__":
-    if already_ran_today() and not IS_GITHUB_ACTIONS:
-        print("=" * 60)
-        print("YOU ALREADY RAN TODAY!")
-        print("Date: " + datetime.now().strftime('%Y-%m-%d'))
-        print("Come back tomorrow for fresh emails!")
-        print("=" * 60)
-    else:
-        daily_scrape()
-
-    if not IS_GITHUB_ACTIONS:
-        input("\nPress ENTER to close...")
+ 
