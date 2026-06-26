@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}  # Needed for push in auto-commit
 
@@ -42,7 +42,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore previous state
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: |
             visited_urls.json
@@ -90,7 +90,7 @@ jobs:
           git push origin main 2>/dev/null || echo "Push skipped - no changes or conflict"
 
       - name: Save state cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: |
             visited_urls.json
@@ -99,14 +99,14 @@ jobs:
           key: scraper-state-${{ runner.os }}
 
       - name: Upload today's results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: romance-readers-batch${{ steps.batch.outputs.batch }}-${{ github.run_id }}
           path: romance_readers_*.txt
           retention-days: 30
 
       - name: Upload master email list
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: master-emails-latest
           path: master_emails.txt
