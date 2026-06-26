@@ -86,37 +86,34 @@ def find_emails(text):
 def clean_emails(email_list):
     email_list = list(set(email_list))
 
-    blocked_domains = [
-        'example.com', 'test.com', 'admin', 'webmaster',
-        'info', 'noreply', 'support', 'sales', 'contact',
-        'help', 'service', 'marketing', 'press', 'media',
-        'pr', 'editor', 'founder', 'ceo', 'cfo', 'cto'
-    ]
+    # Block only on the LOCAL PART (before @) being exactly these words
+    blocked_local_exact = {
+        'admin', 'webmaster', 'noreply', 'no-reply', 'donotreply',
+        'support', 'help', 'info', 'contact', 'sales', 'marketing',
+        'press', 'media', 'editor', 'editors', 'pr', 'ceo', 'cfo',
+        'cto', 'founder', 'hello', 'team', 'staff', 'office'
+    }
 
-    blocked_keywords = [
-        'author', 'writer', 'novelist', 'publisher', 'press',
-        'agency', 'agent', 'literary', 'bookstore', 'shop',
-        'store', 'market'
-    ]
+    # Block emails from obviously non-reader domains
+    blocked_domains_exact = {
+        'example.com', 'test.com', 'sentry.io', 'amazonaws.com',
+        'cloudflare.com', 'wixsite.com', 'squarespace.com'
+    }
 
     clean_list = []
     for email in email_list:
         if '@' not in email:
             continue
-        email_lower = email.lower()
-        skip = False
-        for blocked in blocked_domains:
-            if blocked in email_lower:
-                skip = True
-                break
-        if skip:
+        parts = email.lower().split('@')
+        if len(parts) != 2:
             continue
-        for blocked in blocked_keywords:
-            if blocked in email_lower:
-                skip = True
-                break
-        if skip:
+        local, domain = parts[0], parts[1]
+
+        if local in blocked_local_exact:
             continue
+        if domain in blocked_domains_exact:
+            continue
+
         clean_list.append(email)
 
     return clean_list
@@ -134,7 +131,9 @@ def search_google(keyword, num_results=25, retry=3):
         attempt = 0
         while attempt < retry:
             try:
-                with DDGS() as ddgs:
+                # Route DDG through a proxy — GitHub Actions IPs are blocked by DDG
+                proxy = random.choice(PROXY_LIST) if PROXY_LIST else None
+                with DDGS(proxy=proxy) as ddgs:
                     for r in ddgs.text(keyword, max_results=num_results, region=region):
                         url = r['href']
                         if url not in seen:
@@ -143,6 +142,7 @@ def search_google(keyword, num_results=25, retry=3):
                 break
             except Exception as e:
                 attempt += 1
+                print("  DDG error (region=" + region + ", attempt=" + str(attempt) + "): " + str(e)[:80])
                 time.sleep(random.uniform(2, 4))
         time.sleep(random.uniform(1, 2))
 
@@ -510,4 +510,66 @@ def daily_scrape():
 
         if (idx + 1) % 5 == 0:
             print("\n--- Progress: " + str(len(all_emails)) + " emails so far ---")
- 
+            save_visited_urls(visited_urls)
+
+        if (idx + 1) % 10 == 0:
+            print("\n--- Cooling down... ---")
+            time.sleep(random.uniform(*COOLDOWN_SLEEP))
+        else:
+            time.sleep(random.uniform(*KEYWORD_SLEEP))
+
+    save_visited_urls(visited_urls)
+
+    all_emails = clean_emails(all_emails)
+    all_emails = list(set(all_emails))
+
+    analyze_emails(all_emails)
+
+    new_email_count = save_master_emails(all_emails)
+
+    filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + ".txt"
+    with open(filename, 'w') as f:
+        f.write("# ROMANCE READER EMAILS - " + datetime.now().strftime('%B %d, %Y') + "\n")
+        f.write("# Today new emails: " + str(len(all_emails)) + "\n")
+        f.write("# New additions to master list: " + str(new_email_count) + "\n")
+        f.write("#" + "=" * 50 + "\n\n")
+        for email in all_emails:
+            f.write(email + '\n')
+
+    save_run_date()
+
+    print("\n" + "=" * 60)
+    print("FINAL STATISTICS:")
+    print("  Reader emails found today : " + str(len(all_emails)))
+    print("  New additions to master   : " + str(new_email_count))
+    print("  Websites visited          : " + str(total_websites - skipped_websites))
+    print("  Skipped (seen before)     : " + str(skipped_websites))
+    print("  Saved to                  : " + filename)
+    print("=" * 60)
+
+    if len(all_emails) < 400:
+        print("LOW: Try enabling more keywords")
+    elif len(all_emails) < 750:
+        print("GOOD: Over 400 - heading toward 750+")
+    else:
+        print("TARGET REACHED! 750-1000 emails daily")
+    print("=" * 60)
+
+    return all_emails
+
+# ============================================
+# START
+# ============================================
+
+if __name__ == "__main__":
+    if already_ran_today() and not IS_GITHUB_ACTIONS:
+        print("=" * 60)
+        print("YOU ALREADY RAN TODAY!")
+        print("Date: " + datetime.now().strftime('%Y-%m-%d'))
+        print("Come back tomorrow for fresh emails!")
+        print("=" * 60)
+    else:
+        daily_scrape()
+
+    if not IS_GITHUB_ACTIONS:
+        input("\nPress ENTER to close...")
