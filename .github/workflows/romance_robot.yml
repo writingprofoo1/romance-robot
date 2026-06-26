@@ -2,14 +2,16 @@ name: Romance Robot - Daily Email Scraper
 
 on:
   schedule:
-    - cron: '0 6 * * *'    # 7 AM WAT - Batch 1 (keywords 1-30)
-    - cron: '0 12 * * *'   # 1 PM WAT - Batch 2 (keywords 31-60)
-    - cron: '0 16 * * *'   # 5 PM WAT - Batch 3 (keywords 61-90)
-    - cron: '0 20 * * *'   # 9 PM WAT - Batch 4 (keywords 91-117)
+    - cron: '0 1 * * *'    # 2 AM WAT  - Batch 1
+    - cron: '0 5 * * *'    # 6 AM WAT  - Batch 2
+    - cron: '0 9 * * *'    # 10 AM WAT - Batch 3
+    - cron: '0 13 * * *'   # 2 PM WAT  - Batch 4
+    - cron: '0 17 * * *'   # 6 PM WAT  - Batch 5
+    - cron: '0 21 * * *'   # 10 PM WAT - Batch 6
   workflow_dispatch:
     inputs:
       batch:
-        description: 'Keyword batch to run (1, 2, 3, or 4)'
+        description: 'Keyword batch to run (1-6)'
         required: false
         default: '1'
 
@@ -27,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -50,14 +52,18 @@ jobs:
           HOUR=$(date -u +%H)
           if [ "${{ github.event.inputs.batch }}" != "" ]; then
             echo "batch=${{ github.event.inputs.batch }}" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" -ge "6" ] && [ "$HOUR" -lt "12" ]; then
+          elif [ "$HOUR" -ge "1" ] && [ "$HOUR" -lt "5" ]; then
             echo "batch=1" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" -ge "12" ] && [ "$HOUR" -lt "16" ]; then
+          elif [ "$HOUR" -ge "5" ] && [ "$HOUR" -lt "9" ]; then
             echo "batch=2" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" -ge "16" ] && [ "$HOUR" -lt "20" ]; then
+          elif [ "$HOUR" -ge "9" ] && [ "$HOUR" -lt "13" ]; then
             echo "batch=3" >> $GITHUB_OUTPUT
-          else
+          elif [ "$HOUR" -ge "13" ] && [ "$HOUR" -lt "17" ]; then
             echo "batch=4" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "17" ] && [ "$HOUR" -lt "21" ]; then
+            echo "batch=5" >> $GITHUB_OUTPUT
+          else
+            echo "batch=6" >> $GITHUB_OUTPUT
           fi
 
       - name: Run scraper

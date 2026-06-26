@@ -9,7 +9,6 @@ from ddgs import DDGS
 import time
 import re
 import os
-import sys
 from datetime import datetime
 import json
 import random
@@ -17,7 +16,7 @@ from fake_useragent import UserAgent
 
 # Detect GitHub Actions environment
 IS_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS', 'false').lower() == 'true'
-BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-4 = batch (GitHub Actions)
+BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-6 = batch (GitHub Actions)
 
 # ============================================
 # SETUP
@@ -27,31 +26,65 @@ TRACKER_FILE = "last_run.json"
 VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 
-# 7 DDG regions - each returns different results for the same keyword
-DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en', 'za-en', 'ie-en', 'nz-en']
+# 3 DDG regions — best coverage vs. speed balance
+# us-en covers USA, ca-en covers Canada
+# uk-en covers UK + Africa + Ireland
+# au-en covers Australia + NZ + Asia Pacific
+DDG_REGIONS = ['us-en', 'uk-en', 'au-en']
+
+# Sequential proxy rotation — distributes load evenly across all 10 proxies
+_proxy_index = [0]
+
+def get_next_proxy():
+    if not PROXY_LIST:
+        return None
+    proxy = PROXY_LIST[_proxy_index[0] % len(PROXY_LIST)]
+    _proxy_index[0] += 1
+    return proxy
+
+# UserAgent created once at startup — avoids slow network call per URL
+try:
+    _ua = UserAgent()
+    def get_random_user_agent():
+        return _ua.random
+except Exception:
+    def get_random_user_agent():
+        return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
 
 def load_visited_urls():
     if not os.path.exists(VISITED_URLS_FILE):
         return set()
-    with open(VISITED_URLS_FILE, 'r') as f:
-        return set(json.load(f))
+    try:
+        with open(VISITED_URLS_FILE, 'r') as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
 
 def save_visited_urls(visited):
-    with open(VISITED_URLS_FILE, 'w') as f:
-        json.dump(list(visited), f)
+    try:
+        with open(VISITED_URLS_FILE, 'w') as f:
+            json.dump(list(visited), f)
+    except Exception:
+        pass
 
 def load_master_emails():
     if not os.path.exists(MASTER_EMAILS_FILE):
         return set()
-    with open(MASTER_EMAILS_FILE, 'r') as f:
-        return set(line.strip() for line in f if line.strip())
+    try:
+        with open(MASTER_EMAILS_FILE, 'r') as f:
+            return set(line.strip() for line in f if line.strip())
+    except Exception:
+        return set()
 
 def save_master_emails(new_emails):
     existing = load_master_emails()
     combined = existing | set(new_emails)
-    with open(MASTER_EMAILS_FILE, 'w') as f:
-        for email in sorted(combined):
-            f.write(email + '\n')
+    try:
+        with open(MASTER_EMAILS_FILE, 'w') as f:
+            for email in sorted(combined):
+                f.write(email + '\n')
+    except Exception:
+        pass
     return len(combined) - len(existing)
 
 # PROXY LIST - loaded from environment variable (set in GitHub Secrets)
@@ -131,8 +164,8 @@ def search_google(keyword, num_results=25, retry=3):
         attempt = 0
         while attempt < retry:
             try:
-                # Route DDG through a proxy — GitHub Actions IPs are blocked by DDG
-                proxy = random.choice(PROXY_LIST) if PROXY_LIST else None
+                # Route DDG through proxy — GitHub Actions IPs are blocked by DDG
+                proxy = get_next_proxy()
                 with DDGS(proxy=proxy) as ddgs:
                     for r in ddgs.text(keyword, max_results=num_results, region=region):
                         url = r['href']
@@ -149,10 +182,6 @@ def search_google(keyword, num_results=25, retry=3):
     print("  Found " + str(len(all_results)) + " websites across " + str(len(DDG_REGIONS)) + " regions")
     return all_results
 
-def get_random_user_agent():
-    ua = UserAgent()
-    return ua.random
-
 # ============================================
 # VISIT WEBSITES
 # ============================================
@@ -160,7 +189,7 @@ def get_random_user_agent():
 def scrape_page(url, headers, proxies):
     emails = []
     try:
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=8)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         emails += find_emails(soup.get_text())
@@ -178,15 +207,16 @@ def scrape_page(url, headers, proxies):
 def visit_website(url):
     try:
         headers = {'User-Agent': get_random_user_agent()}
-        proxy = random.choice(PROXY_LIST) if PROXY_LIST else None
+        proxy = get_next_proxy()
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
+        # Main page
         emails = scrape_page(url, headers, proxies)
 
+        # /contact page only — fastest high-yield sub-page
         base = url.rstrip('/')
-        for path in ['/contact', '/about', '/contact-us', '/about-us']:
-            time.sleep(1)
-            emails += scrape_page(base + path, headers, proxies)
+        time.sleep(0.5)
+        emails += scrape_page(base + '/contact', headers, proxies)
 
         return list(set(emails))
     except Exception:
@@ -209,7 +239,7 @@ def is_reader_website(url):
     return True
 
 # ============================================
-# RUN ONCE PER DAY
+# RUN ONCE PER DAY (local only)
 # ============================================
 
 def already_ran_today():
@@ -226,8 +256,11 @@ def already_ran_today():
 
 def save_run_date():
     today = datetime.now().strftime('%Y-%m-%d')
-    with open(TRACKER_FILE, 'w') as f:
-        json.dump({'last_run_date': today}, f)
+    try:
+        with open(TRACKER_FILE, 'w') as f:
+            json.dump({'last_run_date': today}, f)
+    except Exception:
+        pass
 
 # ============================================
 # CHECK QUALITY
@@ -412,7 +445,7 @@ def daily_scrape():
         "dark romance readers",
         "forbidden romance readers",
         "age gap romance readers",
-        # Subgenre-Specific (NEW)
+        # Subgenre-Specific
         "paranormal romance readers",
         "regency romance readers",
         "military romance readers",
@@ -431,7 +464,7 @@ def daily_scrape():
         "cozy romance readers",
         "beach read romance fans",
         "omegaverse romance readers",
-        # Year-Based (NEW)
+        # Year-Based
         "romance readers 2025",
         "romance book club 2025",
         "romance book recommendations 2025",
@@ -440,7 +473,7 @@ def daily_scrape():
         "romance readers 2024",
         "romance book club 2024",
         "romance book recommendations 2024",
-        # Platform-Specific (NEW)
+        # Platform-Specific
         "kindle unlimited romance readers",
         "romance arc readers",
         "romance advance readers copy",
@@ -450,7 +483,7 @@ def daily_scrape():
         "romance book haul",
         "romance books TBR",
         "romance beta readers",
-        # Newsletter/Subscription (NEW)
+        # Newsletter/Subscription
         "romance newsletter subscribers",
         "romance book subscription box",
         "romance arc team",
@@ -461,18 +494,18 @@ def daily_scrape():
         "dark romance book club",
     ]
 
-    # Batch slicing for GitHub Actions (splits keywords into 4 daily chunks)
+    # Batch slicing for GitHub Actions — 6 batches per day
     if IS_GITHUB_ACTIONS and BATCH > 0:
-        batch_size = len(keywords) // 4
+        batch_size = len(keywords) // 6
         start = (BATCH - 1) * batch_size
-        end = start + batch_size if BATCH < 4 else len(keywords)
+        end = start + batch_size if BATCH < 6 else len(keywords)
         keywords = keywords[start:end]
         print("GitHub Actions - Batch " + str(BATCH) + ": keywords " + str(start + 1) + " to " + str(end))
 
-    # Sleep settings: tighter in CI, relaxed locally
-    INTER_URL_SLEEP = (0.5, 1.5) if IS_GITHUB_ACTIONS else (3, 6)
-    KEYWORD_SLEEP   = (3, 5)     if IS_GITHUB_ACTIONS else (12, 18)
-    COOLDOWN_SLEEP  = (10, 15)   if IS_GITHUB_ACTIONS else (40, 60)
+    # Sleep settings: tight in CI, relaxed locally
+    INTER_URL_SLEEP = (0.5, 1.0) if IS_GITHUB_ACTIONS else (3, 6)
+    KEYWORD_SLEEP   = (1, 2)     if IS_GITHUB_ACTIONS else (12, 18)
+    COOLDOWN_SLEEP  = (40, 60)   # local only — not used in CI
 
     all_emails = []
     total_websites = 0
@@ -508,11 +541,13 @@ def daily_scrape():
 
             time.sleep(random.uniform(*INTER_URL_SLEEP))
 
+        # Save progress every 5 keywords
         if (idx + 1) % 5 == 0:
             print("\n--- Progress: " + str(len(all_emails)) + " emails so far ---")
             save_visited_urls(visited_urls)
 
-        if (idx + 1) % 10 == 0:
+        # Cooldown: local only — CI skips this to stay within timeout
+        if not IS_GITHUB_ACTIONS and (idx + 1) % 10 == 0:
             print("\n--- Cooling down... ---")
             time.sleep(random.uniform(*COOLDOWN_SLEEP))
         else:
@@ -527,14 +562,18 @@ def daily_scrape():
 
     new_email_count = save_master_emails(all_emails)
 
-    filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + ".txt"
-    with open(filename, 'w') as f:
-        f.write("# ROMANCE READER EMAILS - " + datetime.now().strftime('%B %d, %Y') + "\n")
-        f.write("# Today new emails: " + str(len(all_emails)) + "\n")
-        f.write("# New additions to master list: " + str(new_email_count) + "\n")
-        f.write("#" + "=" * 50 + "\n\n")
-        for email in all_emails:
-            f.write(email + '\n')
+    filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + "_batch" + str(BATCH) + ".txt"
+    try:
+        with open(filename, 'w') as f:
+            f.write("# ROMANCE READER EMAILS - " + datetime.now().strftime('%B %d, %Y') + "\n")
+            f.write("# Batch: " + str(BATCH) + "\n")
+            f.write("# Today new emails: " + str(len(all_emails)) + "\n")
+            f.write("# New additions to master list: " + str(new_email_count) + "\n")
+            f.write("#" + "=" * 50 + "\n\n")
+            for email in all_emails:
+                f.write(email + '\n')
+    except Exception as e:
+        print("Warning: could not save output file: " + str(e))
 
     save_run_date()
 
@@ -547,8 +586,10 @@ def daily_scrape():
     print("  Saved to                  : " + filename)
     print("=" * 60)
 
-    if len(all_emails) < 400:
-        print("LOW: Try enabling more keywords")
+    if len(all_emails) < 100:
+        print("LOW: Check proxy connection and DDG logs above")
+    elif len(all_emails) < 400:
+        print("BUILDING: Accumulating across batches")
     elif len(all_emails) < 750:
         print("GOOD: Over 400 - heading toward 750+")
     else:
