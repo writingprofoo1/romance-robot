@@ -1,0 +1,92 @@
+name: Romance Robot - Daily Email Scraper
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # 7 AM WAT - Batch 1 (keywords 1-30)
+    - cron: '0 12 * * *'   # 1 PM WAT - Batch 2 (keywords 31-60)
+    - cron: '0 16 * * *'   # 5 PM WAT - Batch 3 (keywords 61-90)
+    - cron: '0 20 * * *'   # 9 PM WAT - Batch 4 (keywords 91-117)
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: 'Keyword batch to run (1, 2, 3, or 4)'
+        required: false
+        default: '1'
+
+concurrency:
+  group: romance-robot-pipeline
+  cancel-in-progress: false  # Queue runs, never cancel — each batch must complete
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore previous state
+        uses: actions/cache@v4
+        with:
+          path: |
+            visited_urls.json
+            master_emails.txt
+          key: scraper-state-${{ runner.os }}
+          restore-keys: |
+            scraper-state-
+
+      - name: Determine batch number
+        id: batch
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "${{ github.event.inputs.batch }}" != "" ]; then
+            echo "batch=${{ github.event.inputs.batch }}" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "6" ] && [ "$HOUR" -lt "12" ]; then
+            echo "batch=1" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "12" ] && [ "$HOUR" -lt "16" ]; then
+            echo "batch=2" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "16" ] && [ "$HOUR" -lt "20" ]; then
+            echo "batch=3" >> $GITHUB_OUTPUT
+          else
+            echo "batch=4" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run scraper
+        env:
+          BATCH: ${{ steps.batch.outputs.batch }}
+          GITHUB_ACTIONS: true
+          PROXY_LIST: ${{ secrets.PROXY_LIST }}
+          GITHUB_TOKENS: ${{ secrets.GITHUB_TOKENS }}
+        run: python romance_robot.py
+
+      - name: Save state cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            visited_urls.json
+            master_emails.txt
+          key: scraper-state-${{ runner.os }}
+
+      - name: Upload today's results
+        uses: actions/upload-artifact@v4
+        with:
+          name: romance-readers-batch${{ steps.batch.outputs.batch }}-${{ github.run_id }}
+          path: romance_readers_*.txt
+          retention-days: 30
+
+      - name: Upload master email list
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-emails-latest
+          path: master_emails.txt
+          retention-days: 90
+          overwrite: true
