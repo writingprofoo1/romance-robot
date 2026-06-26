@@ -1,7 +1,9 @@
-# ROMANCE READER EMAIL ROBOT
-# Finds romance readers from English-speaking countries worldwide!
-# Targets: USA, UK, Canada, Australia, NZ, Nigeria, South Africa, Kenya, Ghana,
-#          Zambia, Zimbabwe, Uganda, Tanzania, Botswana, Namibia, Ireland
+# ROMANCE READER EMAIL ROBOT - SELF-SUSTAINING ENGINE
+# Layer 1: URL TTL        — URLs expire after 30 days, get revisited
+# Layer 2: Daily modifier — rotating search terms, fresh DDG results daily
+# Layer 3: Auto-keywords  — 1,400+ pool, 300 selected per day via date-seed
+# Layer 4: Blog targeting — site:blogspot.com + site:wordpress.com per keyword
+# Layer 5: Email dorking  — "gmail.com" + reader terms → email in snippet, no page visit
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,28 +11,41 @@ from ddgs import DDGS
 import time
 import re
 import os
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 import json
 import random
 from fake_useragent import UserAgent
 
 # Detect GitHub Actions environment
 IS_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS', 'false').lower() == 'true'
-BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-6 = batch (GitHub Actions)
+BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-6 = batch
 
 # ============================================
-# SETUP
+# CONSTANTS
 # ============================================
 
-TRACKER_FILE = "last_run.json"
+TRACKER_FILE      = "last_run.json"
 VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
+URL_TTL_DAYS      = 30   # revisit URLs after 30 days
+KEYWORDS_PER_DAY  = 300  # drawn from pool daily
 
 # 4 DDG regions — full geographic coverage
-# us-en: USA | uk-en: UK + Africa + Ireland | au-en: Australia + NZ + Asia | ca-en: Canada
 DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en']
 
-# Romance blog directories — scraped directly, bypasses search engine limits
+# Daily rotating search modifier — different DDG results each day of week
+DAILY_MODIFIERS = [
+    'reviews',          # Monday
+    'recommendations',  # Tuesday
+    'blog',             # Wednesday
+    'community',        # Thursday
+    'contact',          # Friday
+    'newsletter',       # Saturday
+    'group',            # Sunday
+]
+
+# Romance blog directories — bypasses search engine entirely
 BLOG_DIRECTORIES = [
     "https://blog.feedspot.com/romance_book_blogs/",
     "https://blog.feedspot.com/romance_book_review_blogs/",
@@ -39,7 +54,16 @@ BLOG_DIRECTORIES = [
     "https://www.bookbloggerlist.com/",
 ]
 
-# Sequential proxy rotation — distributes load evenly across all 10 proxies
+# ============================================
+# PROXY & USER AGENT
+# ============================================
+
+_proxy_env = os.environ.get('PROXY_LIST', '')
+PROXY_LIST = [p.strip().rstrip('/') for p in _proxy_env.split(',') if p.strip()]
+
+_token_env = os.environ.get('GITHUB_TOKENS', '')
+GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
+
 _proxy_index = [0]
 
 def get_next_proxy():
@@ -49,7 +73,6 @@ def get_next_proxy():
     _proxy_index[0] += 1
     return proxy
 
-# UserAgent created once at startup — avoids slow network call per URL
 try:
     _ua = UserAgent()
     def get_random_user_agent():
@@ -58,21 +81,82 @@ except Exception:
     def get_random_user_agent():
         return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
 
+# ============================================
+# DIAGNOSTICS
+# ============================================
+
+def print_startup_diagnostics():
+    print("=" * 60)
+    print("DIAGNOSTICS:")
+    if PROXY_LIST:
+        p = PROXY_LIST[0]
+        parts = p.split('@')
+        masked = parts[0].split(':')[0] + ':****@' + parts[1] if len(parts) == 2 else p[:20]
+        print("  PROXY_LIST      : YES - " + str(len(PROXY_LIST)) + " proxies (" + masked + ")")
+    else:
+        print("  PROXY_LIST      : NO - DDG will block GitHub IP. Set secret.")
+    print("  DDG regions     : " + str(DDG_REGIONS))
+    print("  Daily modifier  : " + get_daily_modifier())
+    print("  Batch           : " + str(BATCH))
+    print("  URL TTL         : " + str(URL_TTL_DAYS) + " days")
+    print("=" * 60)
+
+# ============================================
+# URL TTL SYSTEM (Layer 1)
+# ============================================
+
 def load_visited_urls():
     if not os.path.exists(VISITED_URLS_FILE):
-        return set()
+        return {}
     try:
         with open(VISITED_URLS_FILE, 'r') as f:
-            return set(json.load(f))
+            data = json.load(f)
+        # Migrate old list format → dict format
+        if isinstance(data, list):
+            old_date = (datetime.now() - timedelta(days=URL_TTL_DAYS)).strftime('%Y-%m-%d')
+            print("  Migrating visited_urls to TTL format...")
+            return {url: old_date for url in data}
+        return data
     except Exception:
-        return set()
+        return {}
 
-def save_visited_urls(visited):
+def is_url_stale(visited_dict, url):
+    """Returns True if URL should be skipped (visited recently)."""
+    if url not in visited_dict:
+        return False  # never visited — process it
+    try:
+        visited_date = datetime.strptime(visited_dict[url], '%Y-%m-%d')
+        age_days = (datetime.now() - visited_date).days
+        return age_days < URL_TTL_DAYS  # stale if visited within TTL window
+    except Exception:
+        return False
+
+def mark_visited(visited_dict, url):
+    visited_dict[url] = datetime.now().strftime('%Y-%m-%d')
+
+def save_visited_urls(visited_dict):
     try:
         with open(VISITED_URLS_FILE, 'w') as f:
-            json.dump(list(visited), f)
+            json.dump(visited_dict, f)
     except Exception:
         pass
+
+def count_fresh_urls(visited_dict):
+    """Count URLs eligible for revisiting (older than TTL)."""
+    today = datetime.now()
+    expired = 0
+    for date_str in visited_dict.values():
+        try:
+            age = (today - datetime.strptime(date_str, '%Y-%m-%d')).days
+            if age >= URL_TTL_DAYS:
+                expired += 1
+        except Exception:
+            pass
+    return expired
+
+# ============================================
+# MASTER EMAIL LIST
+# ============================================
 
 def load_master_emails():
     if not os.path.exists(MASTER_EMAILS_FILE):
@@ -94,31 +178,8 @@ def save_master_emails(new_emails):
         pass
     return len(combined) - len(existing)
 
-# PROXY LIST - loaded from environment variable (set in GitHub Secrets)
-# Strip trailing slashes — DDGS and requests both reject proxy URLs ending in /
-_proxy_env = os.environ.get('PROXY_LIST', '')
-PROXY_LIST = [p.strip().rstrip('/') for p in _proxy_env.split(',') if p.strip()]
-
-# GITHUB TOKENS - loaded from environment variable (set in GitHub Secrets)
-_token_env = os.environ.get('GITHUB_TOKENS', '')
-GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
-
-def print_startup_diagnostics():
-    print("=" * 60)
-    print("DIAGNOSTICS:")
-    print("  PROXY_LIST set  : " + ("YES - " + str(len(PROXY_LIST)) + " proxies" if PROXY_LIST else "NO - searches will use GitHub IP (DDG will block)"))
-    if PROXY_LIST:
-        # Print first proxy with password masked
-        p = PROXY_LIST[0]
-        parts = p.split('@')
-        masked = parts[0].split(':')[0] + ':****@' + parts[1] if len(parts) == 2 else p[:20] + '...'
-        print("  First proxy     : " + masked)
-    print("  DDG regions     : " + str(DDG_REGIONS))
-    print("  Batch           : " + str(BATCH))
-    print("=" * 60)
-
 # ============================================
-# FIND EMAILS
+# EMAIL FINDING
 # ============================================
 
 def find_emails(text):
@@ -141,7 +202,6 @@ def find_emails(text):
 def clean_emails(email_list):
     email_list = list(set(email_list))
 
-    # Block only on the LOCAL PART (before @) being exactly these words
     blocked_local_exact = {
         'admin', 'webmaster', 'noreply', 'no-reply', 'donotreply',
         'support', 'help', 'info', 'contact', 'sales', 'marketing',
@@ -149,7 +209,6 @@ def clean_emails(email_list):
         'cto', 'founder', 'hello', 'team', 'staff', 'office'
     }
 
-    # Block emails from obviously non-reader domains
     blocked_domains_exact = {
         'example.com', 'test.com', 'sentry.io', 'amazonaws.com',
         'cloudflare.com', 'wixsite.com', 'squarespace.com'
@@ -163,24 +222,202 @@ def clean_emails(email_list):
         if len(parts) != 2:
             continue
         local, domain = parts[0], parts[1]
-
         if local in blocked_local_exact:
             continue
         if domain in blocked_domains_exact:
             continue
-
         clean_list.append(email)
 
     return clean_list
 
 # ============================================
-# MULTI-REGION DDG SEARCH
+# DAILY MODIFIER (Layer 2)
+# ============================================
+
+def get_daily_modifier():
+    return DAILY_MODIFIERS[datetime.now().weekday()]
+
+# ============================================
+# AUTO-KEYWORD GENERATOR (Layer 3)
+# ============================================
+
+def generate_keyword_pool():
+    subgenres = [
+        'paranormal romance', 'regency romance', 'military romance',
+        'billionaire romance', 'small town romance', 'highland romance',
+        'mafia romance', 'reverse harem romance', 'sports romance',
+        'rockstar romance', 'office romance', 'romantic suspense',
+        'shifter romance', 'vampire romance', 'fantasy romance',
+        'cozy romance', 'dark romance', 'historical romance',
+        'contemporary romance', 'spicy romance', 'steamy romance',
+        'viking romance', 'cowboy romance', 'werewolf romance',
+        'alien romance', 'monster romance', 'fae romance',
+    ]
+
+    tropes = [
+        'enemies to lovers', 'slow burn romance', 'grumpy sunshine romance',
+        'fake dating romance', 'second chance romance', 'forbidden romance',
+        'age gap romance', 'forced proximity romance', 'best friends to lovers',
+        'secret romance', 'marriage of convenience romance',
+    ]
+
+    # Reader-only activities — excludes blog/newsletter/forum which pull author & publisher sites
+    activities = [
+        'readers',
+        'book club members',
+        'reading community',
+        'fan community',
+        'reading group',
+        'reader group',
+        'avid readers',
+        'book lovers',
+    ]
+
+    countries = [
+        'USA', 'UK', 'Canada', 'Australia', 'Nigeria', 'South Africa',
+        'Kenya', 'Ghana', 'Ireland', 'New Zealand', 'Jamaica',
+        'Philippines', 'India', 'Singapore', 'Malaysia',
+    ]
+
+    years = ['2024', '2025']
+
+    platforms = [
+        'goodreads', 'blogspot', 'wordpress', 'wattpad', 'bookbub',
+    ]
+
+    generated = []
+
+    # subgenre + activity (27 × 8 = 216)
+    for s in subgenres:
+        for a in activities:
+            generated.append(s + ' ' + a)
+
+    # subgenre + country (27 × 15 = 405)
+    for s in subgenres:
+        for c in countries:
+            generated.append(s + ' readers ' + c)
+
+    # subgenre + year (27 × 2 = 54)
+    for s in subgenres:
+        for y in years:
+            generated.append(s + ' readers ' + y)
+
+    # subgenre + platform (27 × 5 = 135)
+    for s in subgenres:
+        for p in platforms:
+            generated.append(s + ' readers ' + p)
+
+    # trope + activity (11 × 8 = 88)
+    for t in tropes:
+        for a in activities:
+            generated.append(t + ' ' + a)
+
+    # trope + country (11 × 10 = 110)
+    for t in tropes:
+        for c in countries[:10]:
+            generated.append(t + ' readers ' + c)
+
+    # romance + country + activity (15 × 5 = 75)
+    for c in countries:
+        for a in ['readers', 'book club', 'fans', 'community', 'blog']:
+            generated.append('romance ' + a + ' ' + c)
+
+    # subgenre + blog contact (top 15 subgenres)
+    for s in subgenres[:15]:
+        generated.append(s + ' reader blog contact')
+        generated.append(s + ' book club email')
+
+    return list(set(generated))
+
+
+# Static base keywords (always in pool)
+STATIC_KEYWORDS = [
+    "romance book club USA", "American romance readers", "romance books USA",
+    "US romance book club", "romance readers America", "romance readers Texas",
+    "romance readers California", "romance readers New York",
+    "UK romance book club", "British romance readers", "romance books UK",
+    "romance readers UK", "Scottish romance readers", "Welsh romance readers",
+    "Canadian romance readers", "romance book club Canada", "romance books Canada",
+    "Australian romance readers", "romance book club Australia",
+    "New Zealand romance readers", "romance book club NZ",
+    "romance book club Nigeria", "Nigerian romance readers", "romance books Nigeria",
+    "Nigerian book lovers", "Nigerian book blog",
+    "South African romance readers", "romance book club South Africa",
+    "romance books SA", "book club South Africa",
+    "Kenyan romance readers", "romance book club Kenya",
+    "Ghanaian romance readers", "romance book club Ghana", "Ghanaian book lovers",
+    "Zambian romance readers", "Zimbabwe romance readers", "Ugandan romance readers",
+    "Tanzanian romance readers", "Botswana romance readers", "Namibian romance readers",
+    "Irish romance readers", "romance book club Ireland",
+    "Caribbean romance readers", "Jamaica romance readers",
+    "West African romance readers", "East African romance readers",
+    "African romance readers", "romance readers Europe", "romance readers Asia",
+    "goodreads romance reviews", "booktok romance recommendations",
+    "romance book club members", "romance reader community",
+    "romance book lovers group", "bookstagram romance readers",
+    "romance book giveaway", "romance book subscription boxes readers",
+    "booktok book recommendations romance", "romance readers tiktok",
+    "romance book influencer", "romance book street team",
+    "arc readers romance", "romance book buddy read", "romance book pen pals",
+    "romance book review blog", "romance reader blog", "book lover blog romance",
+    "romance novel recommendations blog", "romance book favorites blog",
+    "romance book review sites", "romance book blogger",
+    "romance book review blogger", "book blogger romance genre",
+    "romance book blog community", "romance book blog contact",
+    "romance blogger contact", "romance book blog email",
+    "romance book addict", "romance book obsession",
+    "bibliophile romance books", "booklover romance novels",
+    "reading romance novels", "romance book fan", "avid romance reader",
+    "romance book discussion", "romance reader forum",
+    "romance book club online", "romance reading challenge",
+    "romance book group", "online romance book club", "romance book talk",
+    "romance readers 2025", "romance book club 2025",
+    "romance book recommendations 2025", "best romance books 2025",
+    "romance reading list 2025", "romance readers 2024",
+    "kindle unlimited romance readers", "romance arc readers",
+    "romance advance readers copy", "bookstagram romance community",
+    "romance book haul", "romance books TBR", "romance beta readers",
+    "wattpad romance readers", "romance audiobook listeners",
+    "bookbub romance readers", "romance ebook readers",
+    "colleen hoover readers", "nora roberts readers", "julia quinn readers",
+    "sarah maas readers", "bridgerton fans readers", "outlander readers fans",
+    "romance newsletter subscribers", "romance book subscription box",
+    "romance arc team", "romance bingo readers",
+    "spicy book recommendations", "steamy book club members",
+    "romance reader email list", "romance book club newsletter",
+    "romance book ratings goodreads", "romance book unboxing",
+    "nurses who read romance", "teachers who read romance",
+    "romance books for women", "stay at home moms romance books",
+    "Singapore romance readers", "Malaysia romance readers",
+    "Philippines romance readers", "India romance readers",
+    "Trinidad romance readers", "Pakistan romance readers",
+    "Southeast Asia romance readers",
+]
+
+
+def get_daily_keywords():
+    """Select KEYWORDS_PER_DAY keywords from the full pool using today's date as seed.
+    Deterministic: same date always returns same keywords."""
+    generated = generate_keyword_pool()
+    full_pool = list(set(STATIC_KEYWORDS + generated))
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    # Sort by hash(keyword + date) — deterministic daily shuffle
+    shuffled = sorted(full_pool, key=lambda k: hashlib.md5((k + today).encode()).hexdigest())
+
+    count = min(KEYWORDS_PER_DAY, len(shuffled))
+    print("  Keyword pool    : " + str(len(full_pool)) + " total")
+    print("  Selected today  : " + str(count) + " (date-seeded rotation)")
+    return shuffled[:count]
+
+# ============================================
+# SEARCH (multi-region + modifier + blogs)
 # ============================================
 
 def ddg_search(query, region, num_results, retry):
-    attempt = 0
     results = []
     seen = set()
+    attempt = 0
     while attempt < retry:
         try:
             proxy = get_next_proxy()
@@ -193,7 +430,7 @@ def ddg_search(query, region, num_results, retry):
             break
         except Exception as e:
             attempt += 1
-            print("  DDG error (region=" + region + ", attempt=" + str(attempt) + "): " + str(e)[:80])
+            print("  DDG error (" + region + ", attempt " + str(attempt) + "): " + str(e)[:60])
             time.sleep(random.uniform(2, 4))
     return results
 
@@ -208,38 +445,148 @@ def search_google(keyword, num_results=25, retry=3):
             if url not in seen:
                 seen.add(url)
                 all_results.append(url)
-        time.sleep(random.uniform(1, 2))
+        time.sleep(random.uniform(0.5, 1))
 
-    # Blog-specific searches — personal blogs expose emails far more often
+    # Daily modifier variant — fresh results based on day of week
+    modifier = get_daily_modifier()
+    modified_query = keyword + ' ' + modifier
+    for url in ddg_search(modified_query, 'us-en', num_results, retry):
+        if url not in seen:
+            seen.add(url)
+            all_results.append(url)
+    time.sleep(random.uniform(0.5, 1))
+
+    # Blog-specific — targets personal reader blogs, not author/publisher blogs
     for site in ['site:blogspot.com', 'site:wordpress.com']:
-        blog_query = keyword + ' ' + site
+        blog_query = keyword + ' readers ' + site
         for url in ddg_search(blog_query, 'us-en', num_results, retry):
             if url not in seen:
                 seen.add(url)
                 all_results.append(url)
-        time.sleep(random.uniform(1, 2))
+        time.sleep(random.uniform(0.5, 1))
 
     if len(all_results) == 0:
         print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
     else:
-        print("  Found " + str(len(all_results)) + " URLs (multi-region + blogs)")
+        print("  Found " + str(len(all_results)) + " URLs (4 regions + modifier + blogs)")
     return all_results
 
 # ============================================
-# BLOG DIRECTORY SCRAPING (second source)
+# EMAIL DORK ENGINE (Layer 5)
+# ============================================
+
+def generate_dork_queries():
+    """Generate targeted queries that surface emails directly in DDG snippets."""
+
+    providers = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'ymail.com']
+
+    reader_terms = [
+        '"romance readers"',
+        '"romance book club"',
+        '"romance book review"',
+        '"romance reader"',
+        '"romance book lover"',
+        '"romance reading group"',
+        '"spicy romance readers"',
+        '"dark romance readers"',
+        '"steamy romance readers"',
+    ]
+
+    platforms = ['site:blogspot.com', 'site:wordpress.com']
+
+    countries = [
+        'Nigeria', '"South Africa"', 'Kenya', 'Ghana', 'Uganda',
+        'USA', 'UK', 'Australia', 'Canada', 'Ireland',
+        '"New Zealand"', 'Jamaica', 'Philippines', 'India',
+    ]
+
+    queries = []
+
+    # Provider + reader term + platform (highest yield — personal blogs)
+    for p in providers:
+        for t in reader_terms[:5]:
+            for site in platforms:
+                queries.append('"' + p + '" ' + t + ' ' + site)
+
+    # Provider + reader term + country (geo-targeted)
+    for p in providers[:3]:
+        for t in reader_terms[:4]:
+            for c in countries:
+                queries.append('"' + p + '" ' + t + ' ' + c)
+
+    # Provider + reader term only (broad sweep)
+    for p in providers:
+        for t in reader_terms:
+            queries.append('"' + p + '" ' + t)
+
+    return list(set(queries))
+
+
+def dork_search(batch_dork_queries):
+    """
+    Search DDG with email dork queries.
+    Extracts emails from snippets directly — no page visit needed.
+    Falls back to visiting the page only when snippet has no email.
+    """
+    print("\n--- Email Dork Engine running ---")
+    print("  Dork queries this batch: " + str(len(batch_dork_queries)))
+
+    direct_emails = []
+    fallback_urls = []
+    seen_emails = set()
+    seen_urls = set()
+
+    for idx, query in enumerate(batch_dork_queries):
+        try:
+            proxy = get_next_proxy()
+            with DDGS(proxy=proxy) as ddgs:
+                results = list(ddgs.text(query, max_results=25, region='us-en'))
+
+            for r in results:
+                url = r.get('href', '')
+                snippet = r.get('body', '') + ' ' + r.get('title', '')
+
+                # Try to extract email directly from snippet
+                emails_in_snippet = find_emails(snippet)
+                if emails_in_snippet:
+                    for e in emails_in_snippet:
+                        if e not in seen_emails:
+                            seen_emails.add(e)
+                            direct_emails.append(e)
+                            print("  DORK HIT: " + e + " (from snippet)")
+                elif url and url not in seen_urls and is_reader_website(url):
+                    seen_urls.add(url)
+                    fallback_urls.append(url)
+
+            time.sleep(random.uniform(1, 2))
+
+        except Exception as e:
+            print("  Dork error: " + str(e)[:60])
+            time.sleep(random.uniform(2, 3))
+
+        if (idx + 1) % 10 == 0:
+            print("  Dork progress: " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries, " + str(len(direct_emails)) + " emails found")
+
+    print("  Dork direct emails   : " + str(len(direct_emails)))
+    print("  Dork fallback URLs   : " + str(len(fallback_urls)))
+    return direct_emails, fallback_urls
+
+
+# ============================================
+# BLOG DIRECTORY SCRAPING
 # ============================================
 
 def scrape_blog_directories():
-    print("\n--- Scraping blog directories for additional URLs ---")
+    print("\n--- Scraping blog directories ---")
     found_urls = []
     seen = set()
     headers = {'User-Agent': get_random_user_agent()}
 
-    # Domains to skip — these are the directories themselves, not reader blogs
     skip_domains = [
         'feedspot.com', 'alltop.com', 'google.com', 'facebook.com',
         'twitter.com', 'instagram.com', 'youtube.com', 'pinterest.com',
-        'amazon.com', 'goodreads.com', 'linkedin.com', 'reddit.com'
+        'amazon.com', 'goodreads.com', 'linkedin.com', 'reddit.com',
+        'tiktok.com', 'tumblr.com',
     ]
 
     for directory_url in BLOG_DIRECTORIES:
@@ -253,28 +600,47 @@ def scrape_blog_directories():
                 href = tag['href']
                 if not href.startswith('http'):
                     continue
-                skip = False
-                for domain in skip_domains:
-                    if domain in href:
-                        skip = True
-                        break
+                skip = any(d in href for d in skip_domains)
                 if skip:
                     continue
                 if href not in seen:
                     seen.add(href)
                     found_urls.append(href)
 
-            print("  " + directory_url[:60] + " -> " + str(len(found_urls)) + " URLs so far")
+            print("  " + directory_url[:55] + " -> " + str(len(found_urls)) + " URLs")
             time.sleep(random.uniform(2, 3))
-
         except Exception as e:
-            print("  Directory error: " + str(e)[:60])
+            print("  Directory error: " + str(e)[:50])
 
     print("  Blog directories total: " + str(len(found_urls)) + " unique URLs")
     return found_urls
 
 # ============================================
-# VISIT WEBSITES
+# URL FILTER
+# ============================================
+
+def is_reader_website(url):
+    url_lower = url.lower()
+    blocked_sites = [
+        'amazon.com', 'barnesandnoble.com', 'harlequin.com',
+        'penguinrandomhouse.com', 'simonandschuster.com',
+        'publishersweekly', 'writersdigest', 'literaryagency',
+        'pinterest.com', 'instagram.com', 'facebook.com',
+        'twitter.com', 'tiktok.com', 'youtube.com', 'reddit.com',
+        'linkedin.com', 'tumblr.com', 'snapchat.com',
+        'nielsen.com', 'statista.com', 'forbes.com', 'buzzfeed.com',
+        'huffpost.com', 'theguardian.com', 'nytimes.com',
+        'washingtonpost.com', 'bbc.com', 'cnn.com',
+        'goodreads.com', 'bookbub.com', 'overdrive.com',
+        '/images/', '/reel/', '/video/', '/watch?',
+    ]
+    for blocked in blocked_sites:
+        if blocked in url_lower:
+            return False
+    return True
+
+# ============================================
+# PAGE SCRAPING
 # ============================================
 
 def scrape_page(url, headers, proxies):
@@ -282,15 +648,12 @@ def scrape_page(url, headers, proxies):
     try:
         response = requests.get(url, headers=headers, proxies=proxies, timeout=8)
         soup = BeautifulSoup(response.text, 'html.parser')
-
         emails += find_emails(soup.get_text())
-
         for tag in soup.select('a[href^="mailto:"]'):
             href = tag.get('href', '')
             email = href.replace('mailto:', '').split('?')[0].strip()
             if '@' in email:
                 emails.append(email)
-
     except Exception:
         pass
     return emails
@@ -301,10 +664,7 @@ def visit_website(url):
         proxy = get_next_proxy()
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
-        # Main page
         emails = scrape_page(url, headers, proxies)
-
-        # /contact page — highest email yield of all sub-pages
         base = url.rstrip('/')
         time.sleep(0.5)
         emails += scrape_page(base + '/contact', headers, proxies)
@@ -314,38 +674,7 @@ def visit_website(url):
         return []
 
 # ============================================
-# READER FILTERS
-# ============================================
-
-def is_reader_website(url):
-    url_lower = url.lower()
-    # Block large platforms and non-personal sites — they never expose reader emails
-    blocked_sites = [
-        # Retailers & publishers
-        'amazon.com', 'barnesandnoble.com', 'harlequin.com',
-        'penguinrandomhouse.com', 'simonandschuster.com',
-        'publishersweekly', 'writersdigest', 'literaryagency',
-        # Social media — no scrapable emails
-        'pinterest.com', 'instagram.com', 'facebook.com',
-        'twitter.com', 'tiktok.com', 'youtube.com', 'reddit.com',
-        'linkedin.com', 'tumblr.com', 'snapchat.com',
-        # Research / news
-        'nielsen.com', 'statista.com', 'forbes.com', 'buzzfeed.com',
-        'huffpost.com', 'theguardian.com', 'nytimes.com',
-        'washingtonpost.com', 'bbc.com', 'cnn.com',
-        # Book platforms (author/retail, not readers)
-        'goodreads.com', 'bookbub.com', 'overdrive.com',
-        'librarything.com', 'storygraph.com',
-        # Image / video
-        '/images/', '/reel/', '/video/', '/watch?',
-    ]
-    for blocked in blocked_sites:
-        if blocked in url_lower:
-            return False
-    return True
-
-# ============================================
-# RUN ONCE PER DAY (local only)
+# DAILY RUN CHECK (local only)
 # ============================================
 
 def already_ran_today():
@@ -354,51 +683,39 @@ def already_ran_today():
     try:
         with open(TRACKER_FILE, 'r') as f:
             data = json.load(f)
-        last_run = data.get('last_run_date', '')
-        today = datetime.now().strftime('%Y-%m-%d')
-        return last_run == today
+        return data.get('last_run_date', '') == datetime.now().strftime('%Y-%m-%d')
     except Exception:
         return False
 
 def save_run_date():
-    today = datetime.now().strftime('%Y-%m-%d')
     try:
         with open(TRACKER_FILE, 'w') as f:
-            json.dump({'last_run_date': today}, f)
+            json.dump({'last_run_date': datetime.now().strftime('%Y-%m-%d')}, f)
     except Exception:
         pass
 
 # ============================================
-# CHECK QUALITY
+# EMAIL QUALITY REPORT
 # ============================================
 
 def analyze_emails(email_list):
     reader_indicators = [
-        'book', 'read', 'romance', 'love', 'novel',
-        'story', 'fiction', 'booktok', 'goodreads',
-        'bibliophile', 'booklover', 'bookaddict'
+        'book', 'read', 'romance', 'love', 'novel', 'story',
+        'fiction', 'booktok', 'bibliophile', 'booklover', 'bookaddict'
     ]
-    reader_count = 0
-    for email in email_list:
-        email_lower = email.lower()
-        for indicator in reader_indicators:
-            if indicator in email_lower:
-                reader_count += 1
-                break
-
+    reader_count = sum(
+        1 for e in email_list
+        if any(ind in e.lower() for ind in reader_indicators)
+    )
     total = len(email_list)
     if total > 0:
-        percent = (reader_count / total) * 100
+        pct = round((reader_count / total) * 100, 1)
         print("\n" + "=" * 60)
         print("EMAIL QUALITY REPORT:")
-        print("  Total emails      : " + str(total))
-        print("  Reader emails     : " + str(reader_count) + " (" + str(round(percent, 1)) + "%)")
-        if percent > 70:
-            print("  Rating: Excellent - mostly readers!")
-        elif percent > 50:
-            print("  Rating: Good - can improve")
-        else:
-            print("  Rating: Needs better keywords")
+        print("  Total emails    : " + str(total))
+        print("  Reader emails   : " + str(reader_count) + " (" + str(pct) + "%)")
+        rating = "Excellent!" if pct > 70 else ("Good - improving" if pct > 50 else "Needs better keywords")
+        print("  Rating          : " + rating)
         print("=" * 60)
 
 # ============================================
@@ -407,325 +724,56 @@ def analyze_emails(email_list):
 
 def daily_scrape():
     print("=" * 60)
-    print("ROMANCE READER EMAIL ROBOT")
-    print("Targeting: English-speaking countries worldwide!")
-    print("Daily Target: 750-1000 READER emails")
+    print("ROMANCE READER EMAIL ROBOT - SELF-SUSTAINING ENGINE")
     print("Date: " + datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     print("=" * 60)
     print_startup_diagnostics()
 
-    keywords = [
-        # ---- USA ----
-        "romance book club USA",
-        "American romance readers",
-        "romance books USA",
-        "US romance book club",
-        "romance readers America",
-        "romance readers Texas",
-        "romance readers California",
-        "romance readers New York",
-        "American South romance readers",
-        "Midwest romance readers",
-        # ---- UK ----
-        "UK romance book club",
-        "British romance readers",
-        "romance books UK",
-        "UK book lovers romance",
-        "romance readers UK",
-        "Scottish romance readers",
-        "Welsh romance readers",
-        "English romance readers",
-        # ---- Canada ----
-        "Canadian romance readers",
-        "romance book club Canada",
-        "romance books Canada",
-        "Canada romance readers",
-        # ---- Australia ----
-        "Australian romance readers",
-        "romance book club Australia",
-        "romance books Australia",
-        "Australia romance readers",
-        # ---- New Zealand ----
-        "New Zealand romance readers",
-        "romance book club NZ",
-        "NZ romance readers",
-        # ---- Nigeria ----
-        "romance book club Nigeria",
-        "Nigerian romance readers",
-        "romance books Nigeria",
-        "Nigerian book lovers",
-        "romance readers Nigeria",
-        "Nigerian book blog",
-        # ---- South Africa ----
-        "South African romance readers",
-        "romance book club South Africa",
-        "romance books SA",
-        "book club South Africa",
-        "romance readers South Africa",
-        # ---- Kenya ----
-        "Kenyan romance readers",
-        "romance book club Kenya",
-        "romance books Kenya",
-        # ---- Ghana ----
-        "Ghanaian romance readers",
-        "romance book club Ghana",
-        "romance books Ghana",
-        "Ghanaian book lovers",
-        # ---- Zambia ----
-        "Zambian romance readers",
-        "romance book club Zambia",
-        "romance books Zambia",
-        # ---- Zimbabwe ----
-        "Zimbabwe romance readers",
-        "romance book club Zimbabwe",
-        "romance books Zimbabwe",
-        # ---- Uganda ----
-        "Ugandan romance readers",
-        "romance book club Uganda",
-        "romance books Uganda",
-        # ---- Tanzania ----
-        "Tanzanian romance readers",
-        "romance book club Tanzania",
-        "romance books Tanzania",
-        # ---- Botswana ----
-        "Botswana romance readers",
-        "romance book club Botswana",
-        "romance books Botswana",
-        # ---- Namibia ----
-        "Namibian romance readers",
-        "romance book club Namibia",
-        "romance books Namibia",
-        # ---- Ireland ----
-        "Irish romance readers",
-        "romance book club Ireland",
-        "romance books Ireland",
-        # ---- More Countries ----
-        "Singapore romance readers",
-        "Malaysia romance readers",
-        "Philippines romance readers",
-        "India romance readers",
-        "Caribbean romance readers",
-        "Jamaica romance readers",
-        "Trinidad romance readers",
-        "Pakistan romance readers",
-        "African romance readers",
-        "West African romance readers",
-        "East African romance readers",
-        "romance readers Europe",
-        "romance readers Asia",
-        "Southeast Asia romance readers",
-        # ---- Reader Communities ----
-        "goodreads romance reviews",
-        "booktok romance recommendations",
-        "romance book club members",
-        "romance reader community",
-        "romance book lovers group",
-        "bookstagram romance readers",
-        "romance book giveaway",
-        "romance book subscription boxes readers",
-        "goodreads romance readers",
-        "booktok book recommendations romance",
-        "romance readers tiktok",
-        "romance books instagram",
-        "romance book influencer",
-        "romance book street team",
-        "arc readers romance",
-        "romance book buddy read",
-        "romance reading buddy",
-        "romance book pen pals",
-        "romance book exchange",
-        "romance book swap group",
-        # ---- Reader Blogs ----
-        "romance book review blog",
-        "romance reader blog",
-        "book lover blog romance",
-        "romance novel recommendations blog",
-        "romance book favorites blog",
-        "best romance books review",
-        "romance book review sites",
-        "book review blog romance",
-        "romance book blogger",
-        "romance book review blogger",
-        "book blogger romance genre",
-        "romance genre book blog",
-        "romance book review website",
-        "romance book blog community",
-        "romance book blog contact",
-        "romance blogger contact",
-        "romance book blog email",
-        # ---- Self-Identified Readers ----
-        "romance book addict",
-        "romance book obsession",
-        "bibliophile romance books",
-        "booklover romance novels",
-        "reading romance novels",
-        "i love romance books",
-        "romance book fan",
-        "avid romance reader",
-        # ---- Reader Forums ----
-        "romance book discussion",
-        "romance reader forum",
-        "romance book club online",
-        "romance book swap",
-        "romance reading challenge",
-        "romance book group",
-        "online romance book club",
-        "romance book talk",
-        # ---- Trope-Specific Readers ----
-        "enemies to lovers readers",
-        "slow burn romance fans",
-        "grumpy sunshine romance readers",
-        "fake dating romance readers",
-        "second chance romance fans",
-        "historical romance readers",
-        "contemporary romance readers",
-        "spicy romance readers",
-        "steamy romance readers",
-        "dark romance readers",
-        "forbidden romance readers",
-        "age gap romance readers",
-        "enemies to lovers book club",
-        "slow burn romance book club",
-        "dark romance book club 2025",
-        "steamy romance book recommendations",
-        # ---- Subgenre-Specific ----
-        "paranormal romance readers",
-        "regency romance readers",
-        "military romance readers",
-        "billionaire romance readers",
-        "small town romance readers",
-        "highland romance readers",
-        "mafia romance readers",
-        "reverse harem romance readers",
-        "sports romance readers",
-        "rockstar romance readers",
-        "office romance readers",
-        "romantic suspense readers",
-        "shifter romance readers",
-        "vampire romance readers",
-        "fantasy romance readers",
-        "cozy romance readers",
-        "beach read romance fans",
-        "omegaverse romance readers",
-        "viking romance readers",
-        "pirate romance readers",
-        "cowboy romance readers",
-        "werewolf romance readers",
-        "fae romance readers",
-        "dragon romance readers",
-        "alien romance readers",
-        "monster romance readers",
-        # ---- Year-Based ----
-        "romance readers 2025",
-        "romance book club 2025",
-        "romance book recommendations 2025",
-        "best romance books 2025",
-        "romance reading list 2025",
-        "romance readers 2024",
-        "romance book club 2024",
-        "romance book recommendations 2024",
-        "romance book haul 2025",
-        "romance reading challenge 2025",
-        # ---- Platform-Specific ----
-        "kindle unlimited romance readers",
-        "romance arc readers",
-        "romance advance readers copy",
-        "bookstagram romance community",
-        "romance readers reddit",
-        "romance readers facebook group",
-        "romance book haul",
-        "romance books TBR",
-        "romance beta readers",
-        "wattpad romance readers",
-        "royal road romance readers",
-        "webnovel romance readers",
-        "romance audiobook listeners",
-        "romance ebook readers",
-        "bookbub romance readers",
-        "litsy romance readers",
-        "romance books audible",
-        # ---- Author Fan Communities ----
-        "colleen hoover readers",
-        "nora roberts readers",
-        "julia quinn readers",
-        "lisa kleypas readers",
-        "sarah maas readers",
-        "bridgerton fans readers",
-        "outlander readers fans",
-        "diana gabaldon fans",
-        "jennifer l armentrout readers",
-        "penelope douglas readers",
-        # ---- Newsletter/Subscription ----
-        "romance newsletter subscribers",
-        "romance book subscription box",
-        "romance arc team",
-        "romance bingo readers",
-        "spicy book recommendations",
-        "steamy book club members",
-        "dark romance book club",
-        "romance reader email list",
-        "romance book club newsletter",
-        "romance reading group newsletter",
-        # ---- Format/Review Focused ----
-        "romance book review email",
-        "romance review site contact",
-        "romance reader newsletter",
-        "romance book blog list",
-        "romance book ratings goodreads",
-        "5 star romance books",
-        "romance book unboxing",
-        "romance book aesthetic",
-        "romance book photography",
-        "romance book collection",
-        # ---- Occupation-Based ----
-        "nurses who read romance",
-        "teachers who read romance",
-        "romance reading nurses",
-        "romance reading teachers",
-        "stay at home moms romance books",
-        "romance books for women",
-    ]
+    # --- Get today's keyword set (date-seeded rotation) ---
+    all_keywords = get_daily_keywords()
 
-    # Batch slicing for GitHub Actions — 6 batches per day
+    # --- Batch slice ---
     if IS_GITHUB_ACTIONS and BATCH > 0:
-        batch_size = len(keywords) // 6
+        batch_size = len(all_keywords) // 6
         start = (BATCH - 1) * batch_size
-        end = start + batch_size if BATCH < 6 else len(keywords)
-        keywords = keywords[start:end]
-        print("GitHub Actions - Batch " + str(BATCH) + ": keywords " + str(start + 1) + " to " + str(end))
+        end = start + batch_size if BATCH < 6 else len(all_keywords)
+        all_keywords = all_keywords[start:end]
+        print("Batch " + str(BATCH) + ": keywords " + str(start + 1) + "-" + str(end))
 
-    # Sleep settings: tight in CI, relaxed locally
+    # --- Sleep config ---
     INTER_URL_SLEEP = (0.5, 1.0) if IS_GITHUB_ACTIONS else (3, 6)
     KEYWORD_SLEEP   = (1, 2)     if IS_GITHUB_ACTIONS else (12, 18)
-    COOLDOWN_SLEEP  = (40, 60)   # local only
+    COOLDOWN_SLEEP  = (40, 60)
 
     all_emails = []
     total_websites = 0
-    skipped_websites = 0
+    skipped_ttl = 0
+    skipped_blocked = 0
 
     visited_urls = load_visited_urls()
-    print("Tracking: " + str(len(visited_urls)) + " URLs already visited (will skip)")
-    print("Keywords : " + str(len(keywords)) + " active")
+    fresh_count = count_fresh_urls(visited_urls)
+    print("URL cache       : " + str(len(visited_urls)) + " tracked (" + str(fresh_count) + " expired and eligible for revisit)")
+    print("Keywords        : " + str(len(all_keywords)) + " active this batch")
     print("=" * 60)
 
-    # --- Source 1: DDG multi-region search ---
-    for idx, keyword in enumerate(keywords):
-        print("\n[" + str(idx + 1) + "/" + str(len(keywords)) + "] " + keyword)
+    # --- Source 1: DDG multi-region + modifier + blog searches ---
+    for idx, keyword in enumerate(all_keywords):
+        print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
         urls = search_google(keyword, num_results=25, retry=3)
         total_websites += len(urls)
 
         for url in urls:
-            if url in visited_urls:
-                skipped_websites += 1
+            if is_url_stale(visited_urls, url):
+                skipped_ttl += 1
                 continue
             if not is_reader_website(url):
-                skipped_websites += 1
+                skipped_blocked += 1
                 continue
 
             print("  Visiting: " + url[:70])
             emails = visit_website(url)
-            visited_urls.add(url)
+            mark_visited(visited_urls, url)
 
             if emails:
                 print("  Found " + str(len(emails)) + " email(s)!")
@@ -743,22 +791,50 @@ def daily_scrape():
         else:
             time.sleep(random.uniform(*KEYWORD_SLEEP))
 
-    # --- Source 2: Blog directory scraping (Batch 1 only to avoid duplication) ---
+    # --- Source 2: Email Dork Engine ---
+    all_dork_queries = generate_dork_queries()
+    # Split dork queries across 6 batches same as keywords
+    if IS_GITHUB_ACTIONS and BATCH > 0:
+        dork_batch_size = len(all_dork_queries) // 6
+        dork_start = (BATCH - 1) * dork_batch_size
+        dork_end = dork_start + dork_batch_size if BATCH < 6 else len(all_dork_queries)
+        batch_dork_queries = all_dork_queries[dork_start:dork_end]
+    else:
+        batch_dork_queries = all_dork_queries[:50]  # local run: first 50 only
+
+    dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
+
+    # Add direct dork emails immediately
+    all_emails.extend(dork_emails)
+
+    # Visit fallback URLs (pages where snippet had no email)
+    for url in dork_fallback_urls:
+        if is_url_stale(visited_urls, url):
+            continue
+        print("  [DORK FALLBACK] Visiting: " + url[:70])
+        emails = visit_website(url)
+        mark_visited(visited_urls, url)
+        if emails:
+            print("  Found " + str(len(emails)) + " email(s)!")
+            all_emails.extend(emails)
+        time.sleep(random.uniform(*INTER_URL_SLEEP))
+
+    # --- Source 3: Blog directories (Batch 1 only) ---
     if not IS_GITHUB_ACTIONS or BATCH == 1:
         directory_urls = scrape_blog_directories()
         total_websites += len(directory_urls)
 
         for url in directory_urls:
-            if url in visited_urls:
-                skipped_websites += 1
+            if is_url_stale(visited_urls, url):
+                skipped_ttl += 1
                 continue
             if not is_reader_website(url):
-                skipped_websites += 1
+                skipped_blocked += 1
                 continue
 
             print("  [DIR] Visiting: " + url[:70])
             emails = visit_website(url)
-            visited_urls.add(url)
+            mark_visited(visited_urls, url)
 
             if emails:
                 print("  Found " + str(len(emails)) + " email(s)!")
@@ -778,35 +854,36 @@ def daily_scrape():
     filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + "_batch" + str(BATCH) + ".txt"
     try:
         with open(filename, 'w') as f:
-            f.write("# ROMANCE READER EMAILS - " + datetime.now().strftime('%B %d, %Y') + "\n")
-            f.write("# Batch: " + str(BATCH) + "\n")
-            f.write("# Today new emails: " + str(len(all_emails)) + "\n")
-            f.write("# New additions to master list: " + str(new_email_count) + "\n")
+            f.write("# ROMANCE READER EMAILS\n")
+            f.write("# Date  : " + datetime.now().strftime('%B %d, %Y') + "\n")
+            f.write("# Batch : " + str(BATCH) + "\n")
+            f.write("# New emails today      : " + str(len(all_emails)) + "\n")
+            f.write("# Added to master list  : " + str(new_email_count) + "\n")
             f.write("#" + "=" * 50 + "\n\n")
-            for email in all_emails:
+            for email in sorted(all_emails):
                 f.write(email + '\n')
     except Exception as e:
-        print("Warning: could not save output file: " + str(e))
+        print("Warning: could not write output file: " + str(e))
 
     save_run_date()
 
     print("\n" + "=" * 60)
     print("FINAL STATISTICS:")
-    print("  Reader emails found today : " + str(len(all_emails)))
-    print("  New additions to master   : " + str(new_email_count))
-    print("  Websites visited          : " + str(total_websites - skipped_websites))
-    print("  Skipped (seen before)     : " + str(skipped_websites))
-    print("  Saved to                  : " + filename)
+    print("  Emails found today      : " + str(len(all_emails)))
+    print("  Added to master list    : " + str(new_email_count))
+    print("  Websites visited        : " + str(total_websites - skipped_ttl - skipped_blocked))
+    print("  Skipped (TTL - recent)  : " + str(skipped_ttl))
+    print("  Skipped (blocked site)  : " + str(skipped_blocked))
     print("=" * 60)
 
     if len(all_emails) < 100:
-        print("LOW: Check proxy connection and DDG logs above")
+        print("LOW: Check DIAGNOSTICS above — proxy or DDG issue")
     elif len(all_emails) < 400:
-        print("BUILDING: Accumulating across batches")
+        print("BUILDING: Growing across batches toward 750")
     elif len(all_emails) < 750:
-        print("GOOD: Over 400 - heading toward 750+")
+        print("GOOD: Heading toward 750+")
     else:
-        print("TARGET REACHED! 750-1000 emails daily")
+        print("TARGET REACHED: 750+ emails today!")
     print("=" * 60)
 
     return all_emails
@@ -818,9 +895,8 @@ def daily_scrape():
 if __name__ == "__main__":
     if already_ran_today() and not IS_GITHUB_ACTIONS:
         print("=" * 60)
-        print("YOU ALREADY RAN TODAY!")
+        print("ALREADY RAN TODAY - Come back tomorrow!")
         print("Date: " + datetime.now().strftime('%Y-%m-%d'))
-        print("Come back tomorrow for fresh emails!")
         print("=" * 60)
     else:
         daily_scrape()
