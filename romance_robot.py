@@ -28,8 +28,15 @@ BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-6 = batch
 TRACKER_FILE      = "last_run.json"
 VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
+YIELD_TRACKER_FILE = "yield_tracker.json"
 URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
-KEYWORDS_PER_DAY  = 300  # drawn from pool daily
+KEYWORDS_PER_DAY  = 500  # drawn from pool daily — may be raised by adaptive engine
+
+# Adaptive engine thresholds
+TARGET_DAILY      = 750   # emails/day target
+DROP_L1           = 0.30  # 30% drop → expand keyword pool
+DROP_L2           = 0.50  # 50% drop → add new platforms to dork
+DROP_L3           = 0.70  # 70% drop → purge stale cache + max dork volume
 
 # 4 DDG regions — full geographic coverage
 DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en']
@@ -177,6 +184,124 @@ def save_master_emails(new_emails):
     except Exception:
         pass
     return len(combined) - len(existing)
+
+
+# ============================================
+# ADAPTIVE YIELD ENGINE
+# Monitors daily email yield and auto-expands
+# sources when a drop is detected.
+# ============================================
+
+def load_yield_tracker():
+    if not os.path.exists(YIELD_TRACKER_FILE):
+        return {'daily_yields': [], 'baseline': 0, 'expansion_level': 0}
+    try:
+        with open(YIELD_TRACKER_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {'daily_yields': [], 'baseline': 0, 'expansion_level': 0}
+
+def save_yield_tracker(tracker):
+    try:
+        with open(YIELD_TRACKER_FILE, 'w') as f:
+            json.dump(tracker, f, indent=2)
+    except Exception:
+        pass
+
+def record_batch_yield(new_emails):
+    """Record how many NEW unique emails this batch found."""
+    tracker = load_yield_tracker()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # Accumulate daily total across all 6 batches
+    if not tracker.get('today_date') or tracker['today_date'] != today:
+        # New day — push yesterday's total into history
+        if tracker.get('today_total', 0) > 0:
+            tracker['daily_yields'].append(tracker['today_total'])
+            tracker['daily_yields'] = tracker['daily_yields'][-30:]  # keep 30 days
+        tracker['today_date'] = today
+        tracker['today_total'] = 0
+
+    tracker['today_total'] = tracker.get('today_total', 0) + new_emails
+
+    # Set baseline from first 3 complete days
+    if len(tracker['daily_yields']) == 3 and tracker.get('baseline', 0) == 0:
+        tracker['baseline'] = sum(tracker['daily_yields']) / 3
+        print("  YIELD BASELINE SET: " + str(int(tracker['baseline'])) + " emails/day")
+
+    save_yield_tracker(tracker)
+    return tracker
+
+def get_expansion_level():
+    """
+    Compare recent 3-day average to baseline.
+    Returns expansion level (0-3) needed.
+    0 = normal, 1 = keyword expand, 2 = new platforms, 3 = full expansion + cache purge
+    """
+    tracker = load_yield_tracker()
+    yields = tracker.get('daily_yields', [])
+    baseline = tracker.get('baseline', 0)
+
+    if len(yields) < 3 or baseline == 0:
+        return 0  # not enough history yet
+
+    recent_avg = sum(yields[-3:]) / 3
+    drop = (baseline - recent_avg) / baseline
+
+    current_level = tracker.get('expansion_level', 0)
+
+    if drop >= DROP_L3 and current_level < 3:
+        new_level = 3
+    elif drop >= DROP_L2 and current_level < 2:
+        new_level = 2
+    elif drop >= DROP_L1 and current_level < 1:
+        new_level = 1
+    else:
+        new_level = current_level
+
+    if new_level > current_level:
+        print("\n  ADAPTIVE ENGINE: yield dropped " + str(int(drop * 100)) +
+              "% — triggering expansion level " + str(new_level))
+        tracker['expansion_level'] = new_level
+        save_yield_tracker(tracker)
+
+    return new_level
+
+def apply_expansion(level):
+    """
+    Level 1 (30% drop): Pull more keywords per day (+200)
+    Level 2 (50% drop): Add Wattpad/Royal Road/Tumblr to dork queries
+    Level 3 (70% drop): Purge oldest 40% of visited_urls cache + max dork volume
+    Each level is cumulative — level 3 includes levels 1 and 2.
+    """
+    global KEYWORDS_PER_DAY
+
+    if level >= 1:
+        KEYWORDS_PER_DAY = min(KEYWORDS_PER_DAY + 200, 1000)
+        print("  EXPAND L1: keywords → " + str(KEYWORDS_PER_DAY) + "/day")
+
+    if level >= 2:
+        print("  EXPAND L2: adding Wattpad / Royal Road / Tumblr to dork pool")
+        # Injected into generate_dork_queries at runtime via module-level flag
+        globals()['DORK_EXTRA_PLATFORMS'] = True
+
+    if level >= 3:
+        print("  EXPAND L3: purging oldest 40% of URL cache to force re-discovery")
+        _purge_old_cache(keep_pct=0.60)
+
+def _purge_old_cache(keep_pct=0.60):
+    """Remove the oldest (keep_pct)% of visited_urls entries so pages get re-crawled."""
+    visited = load_visited_urls()
+    if not visited:
+        return
+    # Sort by date ascending (oldest first)
+    sorted_urls = sorted(visited.items(), key=lambda x: x[1])
+    keep_count = int(len(sorted_urls) * keep_pct)
+    kept = dict(sorted_urls[len(sorted_urls) - keep_count:])
+    save_visited_urls(kept)
+    print("  Cache purged: " + str(len(visited) - len(kept)) + " old URLs removed → " +
+          str(len(kept)) + " retained")
+
 
 # ============================================
 # EMAIL FINDING
@@ -613,8 +738,22 @@ def generate_dork_queries():
             for c in countries:
                 tier6.append('"' + p + '" ' + t + ' ' + c)
 
+    # TIER 7 (adaptive): injected when yield drops 50%+ (expansion level 2+)
+    tier7 = []
+    if globals().get('DORK_EXTRA_PLATFORMS'):
+        extra_platforms = [
+            'site:wattpad.com', 'site:royalroad.com',
+            'site:tumblr.com', 'site:deviantart.com',
+        ]
+        for site in extra_platforms:
+            tier7.append('"gmail.com" "romance reader" ' + site)
+            tier7.append('"gmail.com" "romance book club" ' + site)
+            tier7.append('"@gmail.com" "romance" ' + site)
+            tier7.append('"yahoo.com" "romance reader" ' + site)
+        print("  DORK TIER 7 active: " + str(len(tier7)) + " extra-platform queries added")
+
     # Ordered dedup: tier1 first = highest yield always runs in earliest batch
-    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6
+    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7
     seen = set()
     deduped = []
     for q in ordered:
@@ -896,10 +1035,16 @@ def daily_scrape():
     skipped_ttl = 0
     skipped_blocked = 0
 
+    # ── Adaptive engine: check yield trend and expand if needed ──
+    expansion_level = get_expansion_level()
+    if expansion_level > 0:
+        apply_expansion(expansion_level)
+
     visited_urls = load_visited_urls()
     fresh_count = count_fresh_urls(visited_urls)
     print("URL cache       : " + str(len(visited_urls)) + " tracked (" + str(fresh_count) + " expired and eligible for revisit)")
     print("Keywords        : " + str(len(all_keywords)) + " active this batch")
+    print("Expansion level : " + str(expansion_level) + " (0=normal, 1=+kw, 2=+platforms, 3=+cache purge)")
     print("=" * 60)
 
     # --- Source 1: DDG multi-region + modifier + blog searches ---
@@ -996,6 +1141,9 @@ def daily_scrape():
     analyze_emails(all_emails)
 
     new_email_count = save_master_emails(all_emails)
+
+    # Record yield for adaptive engine (runs each batch, accumulates daily total)
+    record_batch_yield(new_email_count)
 
     filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + "_batch" + str(BATCH) + ".txt"
     try:
