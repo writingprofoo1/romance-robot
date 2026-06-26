@@ -407,8 +407,7 @@ KW_SUBGENRES = [
     'nurse romance', 'lawyer romance', 'CEO romance',
     'professor romance', 'teacher romance', 'coach romance',
     'chef romance', 'musician romance', 'artist romance',
-    'single dad romance', 'single mom romance', 'nanny romance',
-    'opposites attract romance', 'forbidden boss romance',
+    'single dad romance', 'single mom romance', 'opposites attract romance', 'forbidden boss romance',
     'age gap romance', 'taboo romance', 'obsession romance',
     'stalker romance', 'psycho romance', 'anti-hero romance',
     'villain romance', 'morally grey romance', 'dark hero romance',
@@ -965,7 +964,7 @@ def is_reader_website(url):
         if pattern in url_lower:
             return False
 
-    # Allow unknown personal-looking domains (small sites)
+    # Unknown domain: allow small personal sites (hard block list above catches junk)
     return True
 
 # ============================================
