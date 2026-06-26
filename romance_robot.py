@@ -30,7 +30,7 @@ VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 YIELD_TRACKER_FILE = "yield_tracker.json"
 URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
-KEYWORDS_PER_DAY  = 500  # drawn from pool daily — may be raised by adaptive engine
+KEYWORDS_PER_DAY  = 20   # TEST MODE — raise back to 500 after confirming emails flow
 
 # Adaptive engine thresholds
 TARGET_DAILY      = 750   # emails/day target
@@ -366,174 +366,170 @@ def get_daily_modifier():
 # AUTO-KEYWORD GENERATOR (Layer 3)
 # ============================================
 
-def generate_keyword_pool():
-    subgenres = [
-        'paranormal romance', 'regency romance', 'military romance',
-        'billionaire romance', 'small town romance', 'highland romance',
-        'mafia romance', 'reverse harem romance', 'sports romance',
-        'rockstar romance', 'office romance', 'romantic suspense',
-        'shifter romance', 'vampire romance', 'fantasy romance',
-        'cozy romance', 'dark romance', 'historical romance',
-        'contemporary romance', 'spicy romance', 'steamy romance',
-        'viking romance', 'cowboy romance', 'werewolf romance',
-        'alien romance', 'monster romance', 'fae romance',
-    ]
+# ============================================
+# 2.5M COMBINATORIAL KEYWORD ENGINE
+# Pool = KW_SUBGENRES × KW_ACTIVITIES × KW_MODIFIERS
+# No list stored — keywords computed from index on the fly
+# At 500/day: 13.7 years to exhaust the full pool
+# ============================================
 
-    tropes = [
-        'enemies to lovers', 'slow burn romance', 'grumpy sunshine romance',
-        'fake dating romance', 'second chance romance', 'forbidden romance',
-        'age gap romance', 'forced proximity romance', 'best friends to lovers',
-        'secret romance', 'marriage of convenience romance',
-    ]
-
-    # Reader-only activities — excludes blog/newsletter/forum which pull author & publisher sites
-    activities = [
-        'readers',
-        'book club members',
-        'reading community',
-        'fan community',
-        'reading group',
-        'reader group',
-        'avid readers',
-        'book lovers',
-    ]
-
-    countries = [
-        'USA', 'UK', 'Canada', 'Australia', 'Nigeria', 'South Africa',
-        'Kenya', 'Ghana', 'Ireland', 'New Zealand', 'Jamaica',
-        'Philippines', 'India', 'Singapore', 'Malaysia',
-    ]
-
-    years = ['2024', '2025']
-
-    platforms = [
-        'goodreads', 'blogspot', 'wordpress', 'wattpad', 'bookbub',
-    ]
-
-    generated = []
-
-    # subgenre + activity (27 × 8 = 216)
-    for s in subgenres:
-        for a in activities:
-            generated.append(s + ' ' + a)
-
-    # subgenre + country (27 × 15 = 405)
-    for s in subgenres:
-        for c in countries:
-            generated.append(s + ' readers ' + c)
-
-    # subgenre + year (27 × 2 = 54)
-    for s in subgenres:
-        for y in years:
-            generated.append(s + ' readers ' + y)
-
-    # subgenre + platform (27 × 5 = 135)
-    for s in subgenres:
-        for p in platforms:
-            generated.append(s + ' readers ' + p)
-
-    # trope + activity (11 × 8 = 88)
-    for t in tropes:
-        for a in activities:
-            generated.append(t + ' ' + a)
-
-    # trope + country (11 × 10 = 110)
-    for t in tropes:
-        for c in countries[:10]:
-            generated.append(t + ' readers ' + c)
-
-    # romance + country + activity (15 × 5 = 75)
-    for c in countries:
-        for a in ['readers', 'book club', 'fans', 'community', 'blog']:
-            generated.append('romance ' + a + ' ' + c)
-
-    # subgenre + blog contact (top 15 subgenres)
-    for s in subgenres[:15]:
-        generated.append(s + ' reader blog contact')
-        generated.append(s + ' book club email')
-
-    return list(set(generated))
-
-
-# Static base keywords (always in pool)
-STATIC_KEYWORDS = [
-    "romance book club USA", "American romance readers", "romance books USA",
-    "US romance book club", "romance readers America", "romance readers Texas",
-    "romance readers California", "romance readers New York",
-    "UK romance book club", "British romance readers", "romance books UK",
-    "romance readers UK", "Scottish romance readers", "Welsh romance readers",
-    "Canadian romance readers", "romance book club Canada", "romance books Canada",
-    "Australian romance readers", "romance book club Australia",
-    "New Zealand romance readers", "romance book club NZ",
-    "romance book club Nigeria", "Nigerian romance readers", "romance books Nigeria",
-    "Nigerian book lovers", "Nigerian book blog",
-    "South African romance readers", "romance book club South Africa",
-    "romance books SA", "book club South Africa",
-    "Kenyan romance readers", "romance book club Kenya",
-    "Ghanaian romance readers", "romance book club Ghana", "Ghanaian book lovers",
-    "Zambian romance readers", "Zimbabwe romance readers", "Ugandan romance readers",
-    "Tanzanian romance readers", "Botswana romance readers", "Namibian romance readers",
-    "Irish romance readers", "romance book club Ireland",
-    "Caribbean romance readers", "Jamaica romance readers",
-    "West African romance readers", "East African romance readers",
-    "African romance readers", "romance readers Europe", "romance readers Asia",
-    "goodreads romance reviews", "booktok romance recommendations",
-    "romance book club members", "romance reader community",
-    "romance book lovers group", "bookstagram romance readers",
-    "romance book giveaway", "romance book subscription boxes readers",
-    "booktok book recommendations romance", "romance readers tiktok",
-    "romance book influencer", "romance book street team",
-    "arc readers romance", "romance book buddy read", "romance book pen pals",
-    "romance book review blog", "romance reader blog", "book lover blog romance",
-    "romance novel recommendations blog", "romance book favorites blog",
-    "romance book review sites", "romance book blogger",
-    "romance book review blogger", "book blogger romance genre",
-    "romance book blog community", "romance book blog contact",
-    "romance blogger contact", "romance book blog email",
-    "romance book addict", "romance book obsession",
-    "bibliophile romance books", "booklover romance novels",
-    "reading romance novels", "romance book fan", "avid romance reader",
-    "romance book discussion", "romance reader forum",
-    "romance book club online", "romance reading challenge",
-    "romance book group", "online romance book club", "romance book talk",
-    "romance readers 2025", "romance book club 2025",
-    "romance book recommendations 2025", "best romance books 2025",
-    "romance reading list 2025", "romance readers 2024",
-    "kindle unlimited romance readers", "romance arc readers",
-    "romance advance readers copy", "bookstagram romance community",
-    "romance book haul", "romance books TBR", "romance beta readers",
-    "wattpad romance readers", "romance audiobook listeners",
-    "bookbub romance readers", "romance ebook readers",
-    "colleen hoover readers", "nora roberts readers", "julia quinn readers",
-    "sarah maas readers", "bridgerton fans readers", "outlander readers fans",
-    "romance newsletter subscribers", "romance book subscription box",
-    "romance arc team", "romance bingo readers",
-    "spicy book recommendations", "steamy book club members",
-    "romance reader email list", "romance book club newsletter",
-    "romance book ratings goodreads", "romance book unboxing",
-    "nurses who read romance", "teachers who read romance",
-    "romance books for women", "stay at home moms romance books",
-    "Singapore romance readers", "Malaysia romance readers",
-    "Philippines romance readers", "India romance readers",
-    "Trinidad romance readers", "Pakistan romance readers",
-    "Southeast Asia romance readers",
+KW_SUBGENRES = [
+    # Core romance subgenres
+    'paranormal romance', 'regency romance', 'military romance',
+    'billionaire romance', 'small town romance', 'highland romance',
+    'mafia romance', 'reverse harem romance', 'sports romance',
+    'rockstar romance', 'office romance', 'romantic suspense',
+    'shifter romance', 'vampire romance', 'fantasy romance',
+    'cozy romance', 'dark romance', 'historical romance',
+    'contemporary romance', 'spicy romance', 'steamy romance',
+    'viking romance', 'cowboy romance', 'werewolf romance',
+    'alien romance', 'monster romance', 'fae romance',
+    'dragon romance', 'witch romance', 'mermaid romance',
+    'angel romance', 'demon romance', 'zombie romance',
+    'time travel romance', 'space romance', 'sci-fi romance',
+    'dystopian romance', 'post-apocalyptic romance', 'gothic romance',
+    'Southern romance', 'beach romance', 'island romance',
+    'mountain romance', 'city romance', 'coastal romance',
+    'holiday romance', 'Christmas romance', 'summer romance',
+    'winter romance', 'autumn romance', 'spring romance',
+    'new adult romance', 'coming of age romance', 'college romance',
+    'high school romance', 'academy romance', 'campus romance',
+    'royal romance', 'princess romance', 'duke romance',
+    'Highlander romance', 'Scottish romance', 'Irish romance',
+    'Italian romance', 'French romance', 'Greek romance',
+    'Russian romance', 'Bratva romance', 'cartel romance',
+    'motorcycle club romance', 'MC romance', 'biker romance',
+    'bodyguard romance', 'celebrity romance', 'athlete romance',
+    'football romance', 'basketball romance', 'hockey romance',
+    'baseball romance', 'MMA romance', 'boxer romance',
+    'soccer romance', 'swimmer romance', 'surfer romance',
+    'firefighter romance', 'police romance', 'doctor romance',
+    'nurse romance', 'lawyer romance', 'CEO romance',
+    'professor romance', 'teacher romance', 'coach romance',
+    'chef romance', 'musician romance', 'artist romance',
+    'single dad romance', 'single mom romance', 'nanny romance',
+    'opposites attract romance', 'forbidden boss romance',
+    'age gap romance', 'taboo romance', 'obsession romance',
+    'stalker romance', 'psycho romance', 'anti-hero romance',
+    'villain romance', 'morally grey romance', 'dark hero romance',
+    'omegaverse romance', 'dark fantasy romance', 'portal fantasy romance',
+    'urban fantasy romance', 'paranormal mystery romance',
+    'romantic comedy', 'rom-com', 'light romance', 'sweet romance',
+    'clean romance', 'inspirational romance', 'Christian romance',
+    'interracial romance', 'multicultural romance', 'LGBTQ romance',
+    'MM romance', 'FF romance', 'bisexual romance', 'non-binary romance',
+    'Colleen Hoover style romance', 'BookTok romance',
+    'dark contemporary romance', 'grumpy hero romance', 'sunshine hero romance',
+    'brooding hero romance', 'tortured hero romance', 'playboy romance',
+    # Tropes as subgenres
+    'enemies to lovers romance', 'slow burn romance', 'grumpy sunshine romance',
+    'fake dating romance', 'second chance romance', 'forbidden romance',
+    'forced proximity romance', 'best friends to lovers romance',
+    'secret romance', 'marriage of convenience romance',
+    'brother best friend romance', 'best friend brother romance',
+    'one night stand romance', 'secret baby romance', 'pregnancy romance',
+    'arranged marriage romance', 'forced marriage romance',
+    'friends with benefits romance', 'love triangle romance',
+    'childhood sweethearts romance', 'reunion romance',
+    'workplace romance', 'forbidden love romance', 'star-crossed romance',
+    'mistaken identity romance', 'road trip romance', 'vacation romance',
+    'pen pal romance', 'online romance', 'long distance romance',
+    'small town girl romance', 'city girl country boy romance',
+    'rich boy poor girl romance', 'opposites romance', 'hate to love romance',
+    'found family romance', 'reverse grumpy sunshine romance',
 ]
 
+KW_ACTIVITIES = [
+    # What readers do / how they identify
+    'readers', 'book club members', 'reading community', 'fan community',
+    'reading group', 'reader group', 'avid readers', 'book lovers',
+    'bookworms', 'voracious readers', 'enthusiastic readers',
+    'passionate readers', 'dedicated readers', 'fans',
+    'book club', 'reading club', 'online book club', 'virtual book club',
+    'arc readers', 'beta readers', 'advance readers', 'early readers',
+    'review team', 'street team', 'ARC team', 'reader team',
+    'newsletter subscribers', 'mailing list', 'email list',
+    'book blog readers', 'blog followers', 'community members',
+    'bookstagram followers', 'BookTok followers', 'goodreads members',
+    'wattpad readers', 'reading challenge participants', 'buddy readers',
+    'book swap members', 'book exchange members', 'reading partners',
+    'fan group', 'discussion group', 'forum members', 'chat group',
+    'series readers', 'audiobook listeners', 'ebook readers',
+    'kindle readers', 'library members', 'subscription box subscribers',
+    'book review bloggers', 'book bloggers', 'book influencers',
+    'bookstagrammers', 'book reviewers', 'book recommenders',
+    'reading buddies', 'book pen pals', 'reading challenge members',
+    'book haul community', 'TBR community', 'romance book fans',
+    'romance enthusiasts', 'romance addicts', 'romance obsessed',
+    'nurses who read', 'teachers who read', 'moms who read',
+    'working women who read', 'college students who read',
+    'binge readers', 'one sitting readers', 'speed readers',
+    'slow readers', 'weekend readers', 'late night readers',
+    'kindle unlimited subscribers', 'audiobook club members',
+    'book unboxing community', 'book subscription members',
+]
+
+KW_MODIFIERS = [
+    # Geographic
+    'USA', 'UK', 'Canada', 'Australia', 'Nigeria', 'South Africa',
+    'Kenya', 'Ghana', 'Ireland', 'New Zealand', 'Jamaica', 'Philippines',
+    'India', 'Singapore', 'Malaysia', 'Trinidad', 'Zimbabwe', 'Uganda',
+    'Tanzania', 'Zambia', 'Botswana', 'Namibia', 'Rwanda', 'Ethiopia',
+    'Pakistan', 'Sri Lanka', 'Bangladesh', 'Indonesia', 'Thailand',
+    'Vietnam', 'Japan', 'South Korea', 'China', 'Taiwan', 'Hong Kong',
+    'Germany', 'France', 'Spain', 'Italy', 'Netherlands', 'Sweden',
+    'Norway', 'Denmark', 'Finland', 'Poland', 'Brazil', 'Mexico',
+    'Argentina', 'Colombia', 'Chile', 'Peru', 'Venezuela',
+    'Texas', 'California', 'New York', 'Florida', 'Georgia',
+    'London', 'Lagos', 'Nairobi', 'Accra', 'Johannesburg', 'Cape Town',
+    'Toronto', 'Sydney', 'Melbourne', 'Auckland', 'Dublin', 'Edinburgh',
+    # Platform/context
+    'blogspot', 'wordpress', 'goodreads', 'wattpad', 'bookbub',
+    'tumblr', 'librarything', 'reddit', 'facebook group', 'instagram',
+    'email list', 'newsletter', 'blog', 'forum', 'community',
+    # Year modifiers
+    '2024', '2025', '2026',
+    # Context modifiers
+    'contact', 'email', 'gmail', 'yahoo', 'hotmail',
+    'join', 'subscribe', 'sign up', 'connect', 'reach out',
+    'recommendations', 'reviews', 'favorites', 'top picks', 'must reads',
+    'book haul', 'TBR', 'reading list', 'wish list', 'series',
+    'buddy read', 'reading challenge', 'book swap', 'giveaway',
+    'ARC', 'beta read', 'review request', 'street team',
+    'discussion', 'chat', 'meet', 'network', 'group',
+]
+
+# ── Combinatorial pool size ───────────────────────────────────────────
+_KW_TOTAL = len(KW_SUBGENRES) * len(KW_ACTIVITIES) * len(KW_MODIFIERS)
+
+def _index_to_keyword(idx):
+    """Convert flat index → 3-component keyword string. Zero memory, instant."""
+    mod_i = idx % len(KW_MODIFIERS)
+    act_i = (idx // len(KW_MODIFIERS)) % len(KW_ACTIVITIES)
+    sub_i = idx // (len(KW_MODIFIERS) * len(KW_ACTIVITIES))
+    return KW_SUBGENRES[sub_i] + ' ' + KW_ACTIVITIES[act_i] + ' ' + KW_MODIFIERS[mod_i]
 
 def get_daily_keywords():
-    """Select KEYWORDS_PER_DAY keywords from the full pool using today's date as seed.
-    Deterministic: same date always returns same keywords."""
-    generated = generate_keyword_pool()
-    full_pool = list(set(STATIC_KEYWORDS + generated))
-
+    """
+    Draw KEYWORDS_PER_DAY keywords from the 2.5M combinatorial space.
+    Date-seeded: same date = same keywords. Different every day for ~13.7 years.
+    Zero memory footprint — each keyword is computed from its index.
+    """
     today = datetime.now().strftime('%Y-%m-%d')
-    # Sort by hash(keyword + date) — deterministic daily shuffle
-    shuffled = sorted(full_pool, key=lambda k: hashlib.md5((k + today).encode()).hexdigest())
+    seed  = int(hashlib.md5(today.encode()).hexdigest(), 16)
+    rng   = random.Random(seed)
 
-    count = min(KEYWORDS_PER_DAY, len(shuffled))
-    print("  Keyword pool    : " + str(len(full_pool)) + " total")
-    print("  Selected today  : " + str(count) + " (date-seeded rotation)")
-    return shuffled[:count]
+    n = min(KEYWORDS_PER_DAY, _KW_TOTAL)
+    indices  = rng.sample(range(_KW_TOTAL), n)
+    keywords = [_index_to_keyword(i) for i in indices]
+
+    print("  Keyword pool    : {:,} combinatorial ({} × {} × {})".format(
+        _KW_TOTAL, len(KW_SUBGENRES), len(KW_ACTIVITIES), len(KW_MODIFIERS)))
+    print("  Selected today  : {} (date-seeded, exhausted in {:,} days)".format(
+        n, _KW_TOTAL // n))
+
+    return keywords
+
 
 # ============================================
 # SEARCH (multi-region + modifier + blogs)
@@ -904,24 +900,72 @@ def scrape_blog_directories():
 # URL FILTER
 # ============================================
 
+# Personal blog domains — only source type that reliably has exposed reader emails
+ALLOWED_DOMAINS = [
+    'blogspot.com', 'wordpress.com', 'wixsite.com', 'weebly.com',
+    'tumblr.com', 'squarespace.com', 'ghost.io', 'substack.com',
+    'medium.com', 'typepad.com', 'blogger.com',
+]
+
+# Hard block — never visit regardless
+BLOCKED_DOMAINS = [
+    # Publishers / retailers
+    'amazon.com', 'barnesandnoble.com', 'harlequin.com', 'bookshop.org',
+    'penguinrandomhouse.com', 'simonandschuster.com', 'macmillan.com',
+    'targetbooks', 'walmart.com', 'ebay.com', 'etsy.com',
+    'nextchapterbooksellers', 'thirdplacebooks', 'powells.com',
+    'indiebound.org', 'booksamillion.com', 'chapters.indigo.ca',
+    # Commercial book platforms
+    'goodreads.com', 'bookbub.com', 'overdrive.com', 'libby.com',
+    'scribd.com', 'wattpad.com', 'royalroad.com', 'webnovel.com',
+    'netgalley.com', 'edelweiss', 'library',
+    # Commercial club/event platforms
+    'meetup.com', 'eventbrite.com', 'bookclubs.com', 'bookclubz.com',
+    'literati.com', 'reese', 'swell', 'libro.fm',
+    # Social media
+    'facebook.com', 'instagram.com', 'twitter.com', 'tiktok.com',
+    'youtube.com', 'pinterest.com', 'linkedin.com', 'snapchat.com',
+    'reddit.com', 'discord.com', 'telegram.org',
+    # News / media
+    'forbes.com', 'buzzfeed.com', 'huffpost.com', 'theguardian.com',
+    'nytimes.com', 'washingtonpost.com', 'bbc.com', 'cnn.com',
+    'publishersweekly', 'writersdigest', 'literaryagency',
+    'nielsen.com', 'statista.com',
+    # URL patterns
+    '/images/', '/reel/', '/video/', '/watch?', '/tag/', '/category/',
+    '/page/', '/search?', '/topics/', '/lists/',
+]
+
 def is_reader_website(url):
+    """
+    ALLOWLIST-first: only visit personal blogs and small personal sites.
+    Everything else (commercial platforms, social media, publishers) blocked.
+    This is why 514 visits returned 0 emails — wrong site types were visited.
+    """
     url_lower = url.lower()
-    blocked_sites = [
-        'amazon.com', 'barnesandnoble.com', 'harlequin.com',
-        'penguinrandomhouse.com', 'simonandschuster.com',
-        'publishersweekly', 'writersdigest', 'literaryagency',
-        'pinterest.com', 'instagram.com', 'facebook.com',
-        'twitter.com', 'tiktok.com', 'youtube.com', 'reddit.com',
-        'linkedin.com', 'tumblr.com', 'snapchat.com',
-        'nielsen.com', 'statista.com', 'forbes.com', 'buzzfeed.com',
-        'huffpost.com', 'theguardian.com', 'nytimes.com',
-        'washingtonpost.com', 'bbc.com', 'cnn.com',
-        'goodreads.com', 'bookbub.com', 'overdrive.com',
-        '/images/', '/reel/', '/video/', '/watch?',
-    ]
-    for blocked in blocked_sites:
+
+    # Hard block first
+    for blocked in BLOCKED_DOMAINS:
         if blocked in url_lower:
             return False
+
+    # Allowlist: personal blog platforms always pass
+    for allowed in ALLOWED_DOMAINS:
+        if allowed in url_lower:
+            return True
+
+    # For unknown domains: allow small personal sites
+    # Block if URL looks like a commercial directory or list page
+    suspicious_patterns = [
+        '/join-a-book-club', '/best-book-clubs', '/book-club-picks',
+        '/find-a-book-club', '/topics/', '/lists/', '/collections/',
+        '/radical-romance', '/women-reading',
+    ]
+    for pattern in suspicious_patterns:
+        if pattern in url_lower:
+            return False
+
+    # Allow unknown personal-looking domains (small sites)
     return True
 
 # ============================================
@@ -1091,7 +1135,7 @@ def daily_scrape():
         dork_end = dork_start + dork_batch_size if BATCH < 6 else len(all_dork_queries)
         batch_dork_queries = all_dork_queries[dork_start:dork_end]
     else:
-        batch_dork_queries = all_dork_queries[:50]  # local run: first 50 only
+        batch_dork_queries = all_dork_queries[:10]  # TEST MODE — raise back to 50
 
     dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
 
