@@ -177,33 +177,52 @@ def clean_emails(email_list):
 # MULTI-REGION DDG SEARCH
 # ============================================
 
+def ddg_search(query, region, num_results, retry):
+    attempt = 0
+    results = []
+    seen = set()
+    while attempt < retry:
+        try:
+            proxy = get_next_proxy()
+            with DDGS(proxy=proxy) as ddgs:
+                for r in ddgs.text(query, max_results=num_results, region=region):
+                    url = r['href']
+                    if url not in seen:
+                        seen.add(url)
+                        results.append(url)
+            break
+        except Exception as e:
+            attempt += 1
+            print("  DDG error (region=" + region + ", attempt=" + str(attempt) + "): " + str(e)[:80])
+            time.sleep(random.uniform(2, 4))
+    return results
+
 def search_google(keyword, num_results=25, retry=3):
     print("  Searching: " + keyword)
     all_results = []
     seen = set()
 
+    # Standard multi-region search
     for region in DDG_REGIONS:
-        attempt = 0
-        while attempt < retry:
-            try:
-                proxy = get_next_proxy()
-                with DDGS(proxy=proxy) as ddgs:
-                    for r in ddgs.text(keyword, max_results=num_results, region=region):
-                        url = r['href']
-                        if url not in seen:
-                            seen.add(url)
-                            all_results.append(url)
-                break
-            except Exception as e:
-                attempt += 1
-                print("  DDG error (region=" + region + ", attempt=" + str(attempt) + "): " + str(e)[:80])
-                time.sleep(random.uniform(2, 4))
+        for url in ddg_search(keyword, region, num_results, retry):
+            if url not in seen:
+                seen.add(url)
+                all_results.append(url)
+        time.sleep(random.uniform(1, 2))
+
+    # Blog-specific searches — personal blogs expose emails far more often
+    for site in ['site:blogspot.com', 'site:wordpress.com']:
+        blog_query = keyword + ' ' + site
+        for url in ddg_search(blog_query, 'us-en', num_results, retry):
+            if url not in seen:
+                seen.add(url)
+                all_results.append(url)
         time.sleep(random.uniform(1, 2))
 
     if len(all_results) == 0:
-        print("  WARNING: 0 results returned — proxy may be blocked or PROXY_LIST empty")
+        print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
     else:
-        print("  Found " + str(len(all_results)) + " websites across " + str(len(DDG_REGIONS)) + " regions")
+        print("  Found " + str(len(all_results)) + " URLs (multi-region + blogs)")
     return all_results
 
 # ============================================
@@ -300,10 +319,25 @@ def visit_website(url):
 
 def is_reader_website(url):
     url_lower = url.lower()
+    # Block large platforms and non-personal sites — they never expose reader emails
     blocked_sites = [
+        # Retailers & publishers
         'amazon.com', 'barnesandnoble.com', 'harlequin.com',
         'penguinrandomhouse.com', 'simonandschuster.com',
-        'literaryagency', 'publishersweekly', 'writersdigest'
+        'publishersweekly', 'writersdigest', 'literaryagency',
+        # Social media — no scrapable emails
+        'pinterest.com', 'instagram.com', 'facebook.com',
+        'twitter.com', 'tiktok.com', 'youtube.com', 'reddit.com',
+        'linkedin.com', 'tumblr.com', 'snapchat.com',
+        # Research / news
+        'nielsen.com', 'statista.com', 'forbes.com', 'buzzfeed.com',
+        'huffpost.com', 'theguardian.com', 'nytimes.com',
+        'washingtonpost.com', 'bbc.com', 'cnn.com',
+        # Book platforms (author/retail, not readers)
+        'goodreads.com', 'bookbub.com', 'overdrive.com',
+        'librarything.com', 'storygraph.com',
+        # Image / video
+        '/images/', '/reel/', '/video/', '/watch?',
     ]
     for blocked in blocked_sites:
         if blocked in url_lower:
