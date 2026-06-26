@@ -28,7 +28,7 @@ BATCH = int(os.environ.get('BATCH', '0'))  # 0 = run all (local), 1-6 = batch
 TRACKER_FILE      = "last_run.json"
 VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
-URL_TTL_DAYS      = 30   # revisit URLs after 30 days
+URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
 KEYWORDS_PER_DAY  = 300  # drawn from pool daily
 
 # 4 DDG regions — full geographic coverage
@@ -476,50 +476,152 @@ def search_google(keyword, num_results=25, retry=3):
 # ============================================
 
 def generate_dork_queries():
-    """Generate targeted queries that surface emails directly in DDG snippets."""
+    """
+    Tiered email dork queries ranked by likelihood of email appearing in DDG snippet.
 
-    providers = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'ymail.com']
+    TIER 1: Reader intentionally posted their email (book swap, ARC, beta, contact)
+    TIER 2: Personal blog contact sections (blogspot/wordpress)
+    TIER 3: Country TLD site: filters (precise, avoids retailers/publishers)
+    TIER 4: Country keyword matrix (broadest coverage, lowest density)
+    """
 
-    reader_terms = [
-        '"romance readers"',
-        '"romance book club"',
-        '"romance book review"',
-        '"romance reader"',
-        '"romance book lover"',
-        '"romance reading group"',
-        '"spicy romance readers"',
-        '"dark romance readers"',
-        '"steamy romance readers"',
+    # TIER 1: Reader explicitly shared their email for a purpose
+    tier1 = [
+        # Book swap
+        '"gmail.com" "romance book swap"',
+        '"yahoo.com" "romance book swap"',
+        '"gmail.com" "romance book exchange"',
+        '"@gmail.com" "romance book swap"',
+        # ARC readers
+        '"gmail.com" "romance arc reader"',
+        '"gmail.com" "romance advance reader"',
+        '"@gmail.com" "romance arc reader"',
+        '"gmail.com" "arc" "romance reader"',
+        # Beta readers
+        '"gmail.com" "romance beta reader"',
+        '"@gmail.com" "romance beta reader"',
+        '"yahoo.com" "romance beta reader"',
+        # "Email me" invitations
+        '"email me" "romance reader" "gmail.com"',
+        '"contact me" "romance books" "gmail.com"',
+        '"email me" "romance book club" "gmail.com"',
+        '"reach me" "romance reader" "gmail.com"',
+        '"email me at" "romance" "gmail.com"',
+        '"email me" "romance reader" "yahoo.com"',
+        # Organized reader activities
+        '"gmail.com" "romance reading challenge"',
+        '"gmail.com" "romance buddy read"',
+        '"gmail.com" "romance book club" "contact"',
+        '"gmail.com" "romance reading group" "contact"',
     ]
 
-    platforms = ['site:blogspot.com', 'site:wordpress.com']
+    # TIER 2: Personal blogs — highest email surface area
+    tier2 = [
+        '"gmail.com" "romance reader" site:blogspot.com',
+        '"gmail.com" "romance book club" site:blogspot.com',
+        '"gmail.com" "romance book review" site:blogspot.com',
+        '"gmail.com" "romance book review blog" site:blogspot.com',
+        '"gmail.com" "romance book lover" site:blogspot.com',
+        '"@gmail.com" "romance reader" site:blogspot.com',
+        '"@gmail.com" "romance book club" site:blogspot.com',
+        '"@yahoo.com" "romance reader" site:blogspot.com',
+        '"gmail.com" "romance reader" site:wordpress.com',
+        '"gmail.com" "romance book club" site:wordpress.com',
+        '"gmail.com" "romance book review blog" site:wordpress.com',
+        '"@gmail.com" "romance readers" site:wordpress.com',
+        '"yahoo.com" "romance reader" site:wordpress.com',
+        '"yahoo.com" "romance book club" site:blogspot.com',
+        '"hotmail.com" "romance reader" site:blogspot.com',
+        '"outlook.com" "romance reader" site:blogspot.com',
+    ]
 
+    # TIER 3: Country TLD — skips retailer/publisher domains
+    tier3 = [
+        '"gmail.com" "romance readers" site:co.uk',
+        '"hotmail.co.uk" "romance readers"',
+        '"hotmail.co.uk" "romance book club"',
+        '"@gmail.com" "romance readers" site:co.uk',
+        '"gmail.com" "romance readers" site:com.ng',
+        '"gmail.com" "romance book club" site:com.ng',
+        '"@gmail.com" "romance readers" site:com.ng',
+        '"gmail.com" "romance readers" site:co.za',
+        '"gmail.com" "romance book club" site:co.za',
+        '"gmail.com" "romance readers" site:co.ke',
+        '"gmail.com" "romance book club" site:co.ke',
+        '"gmail.com" "romance readers" site:com.gh',
+        '"gmail.com" "romance readers" site:com.au',
+        '"gmail.com" "romance book club" site:com.au',
+        '"gmail.com" "romance readers" site:co.nz',
+        '"gmail.com" "romance readers" site:ca',
+        '"gmail.com" "romance book club" site:ca',
+        '"gmail.com" "romance readers" site:ie',
+        '"gmail.com" "romance readers" site:ph',
+    ]
+
+    # TIER 4: Subgenre-specific (high hit rate — very targeted)
+    subgenres = [
+        'dark romance', 'spicy romance', 'contemporary romance',
+        'paranormal romance', 'historical romance', 'steamy romance',
+        'mafia romance', 'billionaire romance', 'sports romance',
+        'reverse harem romance',
+    ]
+    tier4 = []
+    for sub in subgenres:
+        tier4.append('"gmail.com" "' + sub + ' beta reader"')
+        tier4.append('"gmail.com" "' + sub + ' arc reader"')
+        tier4.append('"gmail.com" "' + sub + '" "book swap"')
+        tier4.append('"gmail.com" "' + sub + ' readers" site:blogspot.com')
+        tier4.append('"gmail.com" "' + sub + ' readers" site:wordpress.com')
+        tier4.append('"@gmail.com" "' + sub + ' readers"')
+        tier4.append('"email me" "' + sub + '" "gmail.com"')
+
+    # TIER 5: Extended platforms (snippet extraction from communities)
+    tier5 = [
+        '"gmail.com" "romance" site:bookcrossing.com',
+        '"yahoo.com" "romance" site:bookcrossing.com',
+        '"gmail.com" "romance readers" site:librarything.com',
+        '"gmail.com" "romance book club" site:librarything.com',
+        '"gmail.com" "romance reader" site:tumblr.com',
+        '"gmail.com" "romance book review" site:tumblr.com',
+        '"@gmail.com" "romance reader" site:tumblr.com',
+        '"gmail.com" "romance" "book swap" site:reddit.com',
+        '"gmail.com" "romance arc" site:reddit.com',
+        '"@gmail.com" "romance" site:reddit.com',
+        '"gmail.com" "romance readers" site:goodreads.com',
+        '"@gmail.com" "romance book club" site:goodreads.com',
+        '"gmail.com" "romance reading group" site:goodreads.com',
+        '"gmail.com" "contact for arcs" romance',
+        '"gmail.com" "email for arcs" romance',
+        '"gmail.com" "contact to join" "romance book club"',
+        '"gmail.com" "email to join" "romance readers"',
+        '"yahoo.com" "contact for arcs" romance',
+        '"gmail.com" "romance newsletter" "subscribe"',
+        '"@gmail.com" "romance newsletter"',
+    ]
+
+    # TIER 6: Country keyword matrix — broad sweep
+    tier6 = []
+    providers = ['gmail.com', 'yahoo.com', 'hotmail.com']
+    reader_terms = ['"romance readers"', '"romance book club"', '"romance reader"']
     countries = [
-        'Nigeria', '"South Africa"', 'Kenya', 'Ghana', 'Uganda',
-        'USA', 'UK', 'Australia', 'Canada', 'Ireland',
-        '"New Zealand"', 'Jamaica', 'Philippines', 'India',
+        'Nigeria', '"South Africa"', 'Kenya', 'Ghana',
+        'Australia', 'Canada', 'Ireland', '"New Zealand"',
+        'Jamaica', 'Philippines', 'India', 'Uganda',
     ]
-
-    queries = []
-
-    # Provider + reader term + platform (highest yield — personal blogs)
-    for p in providers:
-        for t in reader_terms[:5]:
-            for site in platforms:
-                queries.append('"' + p + '" ' + t + ' ' + site)
-
-    # Provider + reader term + country (geo-targeted)
-    for p in providers[:3]:
-        for t in reader_terms[:4]:
-            for c in countries:
-                queries.append('"' + p + '" ' + t + ' ' + c)
-
-    # Provider + reader term only (broad sweep)
     for p in providers:
         for t in reader_terms:
-            queries.append('"' + p + '" ' + t)
+            for c in countries:
+                tier6.append('"' + p + '" ' + t + ' ' + c)
 
-    return list(set(queries))
+    # Ordered dedup: tier1 first = highest yield always runs in earliest batch
+    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6
+    seen = set()
+    deduped = []
+    for q in ordered:
+        if q not in seen:
+            seen.add(q)
+            deduped.append(q)
+    return deduped
 
 
 def dork_search(batch_dork_queries):
@@ -536,33 +638,77 @@ def dork_search(batch_dork_queries):
     seen_emails = set()
     seen_urls = set()
 
-    for idx, query in enumerate(batch_dork_queries):
+    # Map query content to best DDG region
+    DORK_REGION_MAP = {
+        'site:co.uk': 'uk-en',   'hotmail.co.uk': 'uk-en',
+        'site:com.au': 'au-en',  'Australia': 'au-en',
+        'site:co.nz': 'nz-en',   'New Zealand': 'nz-en',
+        'site:ca': 'ca-en',      'Canada': 'ca-en',
+        'site:ie': 'ie-en',      'Ireland': 'ie-en',
+        'site:com.ng': 'wt-wt',  'Nigeria': 'wt-wt',
+        'site:co.za': 'wt-wt',   'South Africa': 'wt-wt',
+        'site:co.ke': 'wt-wt',   'Kenya': 'wt-wt',
+        'site:com.gh': 'wt-wt',  'Ghana': 'wt-wt',
+        'site:ph': 'wt-wt',      'Philippines': 'wt-wt',
+        'India': 'wt-wt',        'Jamaica': 'wt-wt',
+        'Uganda': 'wt-wt',
+    }
+    _dork_region_cycle = ['us-en', 'uk-en', 'au-en', 'ca-en', 'wt-wt']
+    _dork_ridx = [0]
+
+    def pick_dork_region(q):
+        for key, reg in DORK_REGION_MAP.items():
+            if key in q:
+                return reg
+        r = _dork_region_cycle[_dork_ridx[0] % len(_dork_region_cycle)]
+        _dork_ridx[0] += 1
+        return r
+
+    # Secondary regions: cross-region sweep doubles snippet coverage
+    SECONDARY_REGION = {
+        'us-en': 'uk-en', 'uk-en': 'us-en', 'au-en': 'us-en',
+        'ca-en': 'us-en', 'ie-en': 'uk-en', 'nz-en': 'au-en',
+        'wt-wt': 'us-en',
+    }
+
+    def run_dork_query(query, region):
+        """Run one dork query, extract emails from snippets, return (emails, urls)."""
+        emails_found = []
+        urls_found = []
         try:
             proxy = get_next_proxy()
             with DDGS(proxy=proxy) as ddgs:
-                results = list(ddgs.text(query, max_results=25, region='us-en'))
-
+                results = list(ddgs.text(query, max_results=30, region=region))
             for r in results:
                 url = r.get('href', '')
                 snippet = r.get('body', '') + ' ' + r.get('title', '')
-
-                # Try to extract email directly from snippet
-                emails_in_snippet = find_emails(snippet)
-                if emails_in_snippet:
-                    for e in emails_in_snippet:
-                        if e not in seen_emails:
-                            seen_emails.add(e)
-                            direct_emails.append(e)
-                            print("  DORK HIT: " + e + " (from snippet)")
-                elif url and url not in seen_urls and is_reader_website(url):
+                for e in find_emails(snippet):
+                    if e not in seen_emails:
+                        seen_emails.add(e)
+                        emails_found.append(e)
+                        print("  DORK HIT: " + e + " (from snippet, " + region + ")")
+                if url and url not in seen_urls and is_reader_website(url) and not find_emails(snippet):
                     seen_urls.add(url)
-                    fallback_urls.append(url)
-
+                    urls_found.append(url)
             time.sleep(random.uniform(1, 2))
-
         except Exception as e:
-            print("  Dork error: " + str(e)[:60])
+            print("  Dork error (" + region + "): " + str(e)[:60])
             time.sleep(random.uniform(2, 3))
+        return emails_found, urls_found
+
+    for idx, query in enumerate(batch_dork_queries):
+        # Primary region (geo-matched)
+        primary = pick_dork_region(query)
+        em, ur = run_dork_query(query, primary)
+        direct_emails.extend(em)
+        fallback_urls.extend(ur)
+
+        # Secondary region (cross-region for higher coverage)
+        secondary = SECONDARY_REGION.get(primary, 'us-en')
+        if secondary != primary:
+            em2, ur2 = run_dork_query(query, secondary)
+            direct_emails.extend(em2)
+            fallback_urls.extend(ur2)
 
         if (idx + 1) % 10 == 0:
             print("  Dork progress: " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries, " + str(len(direct_emails)) + " emails found")
