@@ -30,7 +30,7 @@ VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 YIELD_TRACKER_FILE = "yield_tracker.json"
 URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
-KEYWORDS_PER_DAY  = 20   # TEST MODE — raise back to 500 after confirming emails flow
+KEYWORDS_PER_DAY  = 500  # Full production mode
 
 # Adaptive engine thresholds
 TARGET_DAILY      = 750   # emails/day target
