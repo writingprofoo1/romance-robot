@@ -71,14 +71,10 @@ PROXY_LIST = [p.strip().rstrip('/') for p in _proxy_env.split(',') if p.strip()]
 _token_env = os.environ.get('GITHUB_TOKENS', '')
 GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
 
-_proxy_index = [0]
-
 def get_next_proxy():
     if not PROXY_LIST:
         return None
-    proxy = PROXY_LIST[_proxy_index[0] % len(PROXY_LIST)]
-    _proxy_index[0] += 1
-    return proxy
+    return random.choice(PROXY_LIST)
 
 try:
     _ua = UserAgent()
