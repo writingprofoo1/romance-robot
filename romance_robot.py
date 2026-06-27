@@ -927,6 +927,13 @@ BLOCKED_DOMAINS = [
     'nytimes.com', 'washingtonpost.com', 'bbc.com', 'cnn.com',
     'publishersweekly', 'writersdigest', 'literaryagency',
     'nielsen.com', 'statista.com',
+    # Education / college institutional sites (NOT student blogs)
+    'nces.ed.gov', 'commonapp.org', 'usnews.com', 'collegeboard.org',
+    'collegenavigator', 'cappex.com', 'petersons.com',
+    # Job / career sites
+    'indeed.com', 'glassdoor.com', 'care.com', 'sittercity.com',
+    # Reference / wiki
+    'wikipedia.org', 'wikihow.com', 'britannica.com',
     # URL patterns
     '/images/', '/reel/', '/video/', '/watch?', '/tag/', '/category/',
     '/page/', '/search?', '/topics/', '/lists/',
@@ -971,7 +978,7 @@ def is_reader_website(url):
 def scrape_page(url, headers, proxies):
     emails = []
     try:
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=8)
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=6)
         soup = BeautifulSoup(response.text, 'html.parser')
         emails += find_emails(soup.get_text())
         for tag in soup.select('a[href^="mailto:"]'):
@@ -1091,10 +1098,13 @@ def daily_scrape():
     for idx, keyword in enumerate(all_keywords):
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
-        urls = search_google(keyword, num_results=25, retry=3)
+        urls = search_google(keyword, num_results=10, retry=3)
         total_websites += len(urls)
 
+        visited_this_keyword = 0
         for url in urls:
+            if visited_this_keyword >= 3:  # max 3 URL visits per keyword
+                break
             if is_url_stale(visited_urls, url):
                 skipped_ttl += 1
                 continue
@@ -1105,6 +1115,7 @@ def daily_scrape():
             print("  Visiting: " + url[:70])
             emails = visit_website(url)
             mark_visited(visited_urls, url)
+            visited_this_keyword += 1
 
             if emails:
                 print("  Found " + str(len(emails)) + " email(s)!")
@@ -1115,6 +1126,18 @@ def daily_scrape():
         if (idx + 1) % 5 == 0:
             print("\n--- Progress: " + str(len(all_emails)) + " emails so far ---")
             save_visited_urls(visited_urls)
+
+        # Mid-run checkpoint every 10 keywords — survives timeout kill
+        if IS_GITHUB_ACTIONS and (idx + 1) % 10 == 0 and all_emails:
+            save_master_emails(all_emails)
+            try:
+                import subprocess
+                subprocess.run(['git', 'add', 'master_emails.txt', 'visited_urls.json'], capture_output=True)
+                subprocess.run(['git', 'commit', '-m', 'bot: mid-run checkpoint [skip ci]'], capture_output=True)
+                subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True)
+                print("  Checkpoint committed (" + str(len(all_emails)) + " emails so far)")
+            except Exception as e:
+                print("  Checkpoint skipped: " + str(e)[:40])
 
         if not IS_GITHUB_ACTIONS and (idx + 1) % 10 == 0:
             print("\n--- Cooling down... ---")
@@ -1139,7 +1162,7 @@ def daily_scrape():
     all_emails.extend(dork_emails)
 
     # Visit fallback URLs (pages where snippet had no email) — hard cap to keep batch <3hrs
-    MAX_FALLBACK = 150
+    MAX_FALLBACK = 100
     dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
     print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
     for url in dork_fallback_urls:
