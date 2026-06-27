@@ -822,8 +822,9 @@ def dork_search(batch_dork_queries):
                         emails_found.append(e)
                         print("  DORK HIT: " + e + " (from snippet, " + region + ")")
                 if url and url not in seen_urls and is_reader_website(url) and not find_emails(snippet):
-                    seen_urls.add(url)
-                    urls_found.append(url)
+                    if len(urls_found) < 5:  # max 5 fallback URLs per dork query
+                        seen_urls.add(url)
+                        urls_found.append(url)
             time.sleep(random.uniform(1, 2))
         except Exception as e:
             print("  Dork error (" + region + "): " + str(e)[:60])
@@ -1141,7 +1142,10 @@ def daily_scrape():
     # Add direct dork emails immediately
     all_emails.extend(dork_emails)
 
-    # Visit fallback URLs (pages where snippet had no email)
+    # Visit fallback URLs (pages where snippet had no email) — hard cap to keep batch <3hrs
+    MAX_FALLBACK = 150
+    dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
+    print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
     for url in dork_fallback_urls:
         if is_url_stale(visited_urls, url):
             continue
