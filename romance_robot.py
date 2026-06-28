@@ -1,9 +1,9 @@
 # ROMANCE READER EMAIL ROBOT - SELF-SUSTAINING ENGINE
-# Layer 1: URL TTL        — URLs expire after 30 days, get revisited
-# Layer 2: Daily modifier — rotating search terms, fresh DDG results daily
-# Layer 3: Auto-keywords  — 1,400+ pool, 300 selected per day via date-seed
-# Layer 4: Blog targeting — site:blogspot.com + site:wordpress.com per keyword
-# Layer 5: Email dorking  — "gmail.com" + reader terms → email in snippet, no page visit
+# Layer 1: URL TTL        — URLs expire after 7 days, get revisited weekly
+# Layer 2: Daily modifier — rotating search terms, fresh DDG results each day
+# Layer 3: Auto-keywords  — 1.68M combinatorial pool, 500 selected per day via date-seed
+# Layer 4: Blog targeting — blogspot.com + wordpress.com per keyword
+# Layer 5: Email dorking  — "gmail.com/yahoo/hotmail" + reader terms → email in snippet
 
 import requests
 from bs4 import BeautifulSoup
@@ -332,7 +332,7 @@ def clean_emails(email_list):
 
     blocked_domains_exact = {
         'example.com', 'test.com', 'sentry.io', 'amazonaws.com',
-        'cloudflare.com', 'wixsite.com', 'squarespace.com'
+        'cloudflare.com', 'noreply.github.com', 'users.noreply.github.com'
     }
 
     clean_list = []
@@ -550,41 +550,31 @@ def ddg_search(query, region, num_results, retry):
             time.sleep(random.uniform(2, 4))
     return results
 
-def search_google(keyword, num_results=25, retry=3):
+def search_google(keyword, num_results=10, retry=3):
     print("  Searching: " + keyword)
     all_results = []
     seen = set()
 
-    # Standard multi-region search
-    for region in DDG_REGIONS:
+    # 2 regions only (us-en + uk-en) — enough candidates, saves 2 DDG calls/keyword
+    for region in ['us-en', 'uk-en']:
         for url in ddg_search(keyword, region, num_results, retry):
             if url not in seen:
                 seen.add(url)
                 all_results.append(url)
         time.sleep(random.uniform(0.5, 1))
 
-    # Daily modifier variant — fresh results based on day of week
-    modifier = get_daily_modifier()
-    modified_query = keyword + ' ' + modifier
-    for url in ddg_search(modified_query, 'us-en', num_results, retry):
+    # 1 blog-specific search — personal reader blogs
+    blog_query = keyword + ' readers site:blogspot.com OR site:wordpress.com'
+    for url in ddg_search(blog_query, 'us-en', num_results, retry):
         if url not in seen:
             seen.add(url)
             all_results.append(url)
     time.sleep(random.uniform(0.5, 1))
 
-    # Blog-specific — targets personal reader blogs, not author/publisher blogs
-    for site in ['site:blogspot.com', 'site:wordpress.com']:
-        blog_query = keyword + ' readers ' + site
-        for url in ddg_search(blog_query, 'us-en', num_results, retry):
-            if url not in seen:
-                seen.add(url)
-                all_results.append(url)
-        time.sleep(random.uniform(0.5, 1))
-
     if len(all_results) == 0:
         print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
     else:
-        print("  Found " + str(len(all_results)) + " URLs (4 regions + modifier + blogs)")
+        print("  Found " + str(len(all_results)) + " URLs")
     return all_results
 
 # ============================================
@@ -870,7 +860,7 @@ def scrape_blog_directories():
         try:
             proxy = get_next_proxy()
             proxies = {"http": proxy, "https": proxy} if proxy else None
-            response = requests.get(directory_url, headers=headers, proxies=proxies, timeout=8)
+            response = requests.get(directory_url, headers=headers, proxies=proxies, timeout=6)
             soup = BeautifulSoup(response.text, 'html.parser')
 
             for tag in soup.find_all('a', href=True):
@@ -978,7 +968,7 @@ def is_reader_website(url):
 def scrape_page(url, headers, proxies):
     emails = []
     try:
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=6)
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
         emails += find_emails(soup.get_text())
         for tag in soup.select('a[href^="mailto:"]'):
@@ -986,24 +976,22 @@ def scrape_page(url, headers, proxies):
             email = href.replace('mailto:', '').split('?')[0].strip()
             if '@' in email:
                 emails.append(email)
-    except Exception:
-        pass
+    except Exception as e:
+        err = str(e)[:40]
+        if 'ProxyError' in err or '402' in err or '407' in err:
+            print("  PROXY ERR: " + err)
     return emails
 
 def visit_website(url):
-    try:
-        headers = {'User-Agent': get_random_user_agent()}
-        proxy = get_next_proxy()
-        proxies = {"http": proxy, "https": proxy} if proxy else None
-
-        emails = scrape_page(url, headers, proxies)
+    headers = {'User-Agent': get_random_user_agent()}
+    proxy = get_next_proxy()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    emails = scrape_page(url, headers, proxies)
+    # Only visit /contact if main page had no emails — saves ~50% of HTTP calls
+    if not emails:
         base = url.rstrip('/')
-        time.sleep(0.5)
         emails += scrape_page(base + '/contact', headers, proxies)
-
-        return list(set(emails))
-    except Exception:
-        return []
+    return list(set(emails))
 
 # ============================================
 # DAILY RUN CHECK (local only)
@@ -1061,6 +1049,11 @@ def daily_scrape():
     print("=" * 60)
     print_startup_diagnostics()
 
+    # ── Adaptive engine: MUST run before get_daily_keywords so expansion affects count ──
+    expansion_level = get_expansion_level()
+    if expansion_level > 0:
+        apply_expansion(expansion_level)
+
     # --- Get today's keyword set (date-seeded rotation) ---
     all_keywords = get_daily_keywords()
 
@@ -1082,11 +1075,6 @@ def daily_scrape():
     skipped_ttl = 0
     skipped_blocked = 0
 
-    # ── Adaptive engine: check yield trend and expand if needed ──
-    expansion_level = get_expansion_level()
-    if expansion_level > 0:
-        apply_expansion(expansion_level)
-
     visited_urls = load_visited_urls()
     fresh_count = count_fresh_urls(visited_urls)
     print("URL cache       : " + str(len(visited_urls)) + " tracked (" + str(fresh_count) + " expired and eligible for revisit)")
@@ -1103,7 +1091,7 @@ def daily_scrape():
 
         visited_this_keyword = 0
         for url in urls:
-            if visited_this_keyword >= 3:  # max 3 URL visits per keyword
+            if visited_this_keyword >= 2:  # max 2 URL visits per keyword
                 break
             if is_url_stale(visited_urls, url):
                 skipped_ttl += 1
@@ -1154,7 +1142,7 @@ def daily_scrape():
         dork_end = dork_start + dork_batch_size if BATCH < 6 else len(all_dork_queries)
         batch_dork_queries = all_dork_queries[dork_start:dork_end]
     else:
-        batch_dork_queries = all_dork_queries[:10]  # TEST MODE — raise back to 50
+        batch_dork_queries = all_dork_queries  # full local run
 
     dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
 
@@ -1162,7 +1150,7 @@ def daily_scrape():
     all_emails.extend(dork_emails)
 
     # Visit fallback URLs (pages where snippet had no email) — hard cap to keep batch <3hrs
-    MAX_FALLBACK = 100
+    MAX_FALLBACK = 75
     dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
     print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
     for url in dork_fallback_urls:
@@ -1176,9 +1164,10 @@ def daily_scrape():
             all_emails.extend(emails)
         time.sleep(random.uniform(*INTER_URL_SLEEP))
 
-    # --- Source 3: Blog directories (Batch 1 only) ---
+    # --- Source 3: Blog directories (Batch 1 only, capped at 60 URLs) ---
     if not IS_GITHUB_ACTIONS or BATCH == 1:
         directory_urls = scrape_blog_directories()
+        directory_urls = directory_urls[:60]  # cap — prevents Batch 1 running 3+ hrs
         total_websites += len(directory_urls)
 
         for url in directory_urls:
