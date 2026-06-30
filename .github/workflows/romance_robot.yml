@@ -102,8 +102,9 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: romance-readers-batch${{ steps.batch.outputs.batch }}-${{ github.run_id }}
-          path: romance_readers_*.txt
+          path: master_emails.txt
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Upload master email list
         uses: actions/upload-artifact@v4.6.2
