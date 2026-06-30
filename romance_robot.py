@@ -1265,6 +1265,21 @@ def daily_scrape():
     print("Date: " + datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     print("=" * 60)
 
+    # Soft timeout — exit all loops at 82 min so auto-commit always gets its window
+    # GitHub hard-kills at 90 min; 8 min buffer covers auto-commit + cache + artifact steps
+    SCRAPER_SOFT_TIMEOUT = 82 * 60  # seconds
+    _scraper_start = time.time()
+
+    def _time_left():
+        return SCRAPER_SOFT_TIMEOUT - (time.time() - _scraper_start)
+
+    def _out_of_time():
+        remaining = _time_left()
+        if remaining <= 0:
+            print("  SOFT TIMEOUT: 82 min reached — saving and exiting for auto-commit")
+            return True
+        return False
+
     # ── Init proxy list FIRST so diagnostics shows correct count ──
     _init_proxy_list()
     print_startup_diagnostics()
@@ -1317,6 +1332,8 @@ def daily_scrape():
     dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
     print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
     for url in dork_fallback_urls:
+        if _out_of_time():
+            break
         if is_url_stale(visited_urls, url):
             continue
         print("  [DORK FALLBACK] Visiting: " + url[:70])
@@ -1330,6 +1347,8 @@ def daily_scrape():
     # --- Source 2: DDG multi-region + modifier + blog searches ---
     consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
+        if _out_of_time():
+            break
         # Top-up proxy pool every 10 keywords if running low
         if (idx % 10 == 0) and IS_GITHUB_ACTIONS:
             _maybe_topup_proxies()
@@ -1406,6 +1425,8 @@ def daily_scrape():
         total_websites += len(directory_urls)
 
         for url in directory_urls:
+            if _out_of_time():
+                break
             if is_url_stale(visited_urls, url):
                 skipped_ttl += 1
                 continue
