@@ -140,7 +140,7 @@ def _test_proxy(proxy):
     2s timeout: dead proxies fail in <0.3s, live ones respond in <1s.
     """
     try:
-        r = requests.get('https://httpbin.org/ip',
+        r = requests.get('https://api.ipify.org',
                          proxies={'http': proxy, 'https': proxy},
                          timeout=2)
         return r.status_code == 200
@@ -217,6 +217,38 @@ def _init_proxy_list():
             SKIP_DDG_NO_PROXY = True
             print("  CRITICAL: 0 working proxies — DDG keyword phase SKIPPED to protect GitHub IP")
             print("  Only dork engine (proxy-required mode) and blog directories will run")
+
+_TOPUP_IN_PROGRESS = False  # prevents concurrent top-up calls
+
+def _maybe_topup_proxies():
+    """
+    Called every 10 keywords in the keyword loop.
+    If pool drops to ≤10, refetch proxies (30s cap) to keep scraping alive.
+    Single-threaded context only — no lock needed on the flag itself.
+    """
+    global PROXY_DEPLETED, _TOPUP_IN_PROGRESS
+    # NOTE: intentionally NOT blocking on PROXY_DEPLETED — topup is the fix for depletion
+    if SKIP_DDG_NO_PROXY or _TOPUP_IN_PROGRESS:
+        return
+    with _PROXY_LOCK:
+        remaining = len(PROXY_LIST)
+    if remaining > 10 and not PROXY_DEPLETED:
+        return  # pool healthy and not depleted — no action needed
+    print("  PROXY LOW (" + str(remaining) + " remaining) — topping up mid-run...")
+    _TOPUP_IN_PROGRESS = True
+    try:
+        fresh = _load_working_free_proxies(target=50, time_limit=30)
+        if fresh:
+            with _PROXY_LOCK:
+                existing = set(PROXY_LIST)
+                new_only = [p for p in fresh if p not in existing]
+                PROXY_LIST.extend(new_only)
+            PROXY_DEPLETED = False  # reset — pool is alive again
+            print("  Top-up complete: +" + str(len(new_only)) + " proxies → pool now " + str(len(PROXY_LIST)))
+        else:
+            print("  Top-up failed: no new proxies found — continuing with remaining pool")
+    finally:
+        _TOPUP_IN_PROGRESS = False
 
 try:
     _ua = UserAgent()
@@ -1269,9 +1301,46 @@ def daily_scrape():
     print("Expansion level : " + str(expansion_level) + " (0=normal, 1=+kw, 2=+platforms, 3=+cache purge)")
     print("=" * 60)
 
-    # --- Source 1: DDG multi-region + modifier + blog searches ---
+    # --- Source 1: Email Dork Engine (runs FIRST — fastest email/min source) ---
+    all_dork_queries = generate_dork_queries()
+    if IS_GITHUB_ACTIONS and BATCH > 0:
+        dork_batch_size = len(all_dork_queries) // 6
+        dork_start = (BATCH - 1) * dork_batch_size
+        dork_end = dork_start + dork_batch_size if BATCH < 6 else len(all_dork_queries)
+        batch_dork_queries = all_dork_queries[dork_start:dork_end]
+    else:
+        batch_dork_queries = all_dork_queries
+
+    dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
+
+    # Save dork emails immediately — protected before keyword loop runs
+    all_emails.extend(dork_emails)
+    if dork_emails:
+        save_master_emails(all_emails)
+        print("  Dork checkpoint: " + str(len(dork_emails)) + " emails saved immediately")
+
+    # Visit dork fallback URLs (pages where snippet had no email)
+    MAX_FALLBACK = 75
+    dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
+    print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
+    for url in dork_fallback_urls:
+        if is_url_stale(visited_urls, url):
+            continue
+        print("  [DORK FALLBACK] Visiting: " + url[:70])
+        emails = visit_website(url)
+        mark_visited(visited_urls, url)
+        if emails:
+            print("  Found " + str(len(emails)) + " email(s)!")
+            all_emails.extend(emails)
+        time.sleep(random.uniform(*INTER_URL_SLEEP))
+
+    # --- Source 2: DDG multi-region + modifier + blog searches ---
     consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
+        # Top-up proxy pool every 10 keywords if running low
+        if (idx % 10 == 0) and IS_GITHUB_ACTIONS:
+            _maybe_topup_proxies()
+
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
         urls = search_google(keyword, num_results=10, retry=1)
@@ -1336,40 +1405,6 @@ def daily_scrape():
             time.sleep(random.uniform(*COOLDOWN_SLEEP))
         else:
             time.sleep(random.uniform(*KEYWORD_SLEEP))
-
-    # --- Source 2: Email Dork Engine ---
-    all_dork_queries = generate_dork_queries()
-    # Split dork queries across 6 batches same as keywords
-    if IS_GITHUB_ACTIONS and BATCH > 0:
-        dork_batch_size = len(all_dork_queries) // 6
-        dork_start = (BATCH - 1) * dork_batch_size
-        dork_end = dork_start + dork_batch_size if BATCH < 6 else len(all_dork_queries)
-        batch_dork_queries = all_dork_queries[dork_start:dork_end]
-    else:
-        batch_dork_queries = all_dork_queries  # full local run
-
-    dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
-
-    # Add direct dork emails immediately AND save — protects against any crash below
-    all_emails.extend(dork_emails)
-    if dork_emails:
-        save_master_emails(all_emails)
-        print("  Dork checkpoint: " + str(len(dork_emails)) + " emails saved immediately")
-
-    # Visit fallback URLs (pages where snippet had no email) — hard cap to keep batch <3hrs
-    MAX_FALLBACK = 75
-    dork_fallback_urls = dork_fallback_urls[:MAX_FALLBACK]
-    print("  Visiting " + str(len(dork_fallback_urls)) + " fallback URLs (capped at " + str(MAX_FALLBACK) + ")")
-    for url in dork_fallback_urls:
-        if is_url_stale(visited_urls, url):
-            continue
-        print("  [DORK FALLBACK] Visiting: " + url[:70])
-        emails = visit_website(url)
-        mark_visited(visited_urls, url)
-        if emails:
-            print("  Found " + str(len(emails)) + " email(s)!")
-            all_emails.extend(emails)
-        time.sleep(random.uniform(*INTER_URL_SLEEP))
 
     # --- Source 3: Blog directories (Batch 1 only, capped at 60 URLs) ---
     if not IS_GITHUB_ACTIONS or BATCH == 1:
