@@ -738,6 +738,7 @@ def ddg_search(query, region, num_results, retry):
         except Exception as e:
             attempt += 1
             print("  DDG error (" + region + ", attempt " + str(attempt) + "): " + str(e)[:60])
+            _evict_proxy(proxy)  # dead proxy — remove from pool immediately
             time.sleep(random.uniform(2, 4))
     return results
 
@@ -1273,16 +1274,8 @@ def daily_scrape():
     if expansion_level > 0:
         apply_expansion(expansion_level)
 
-    # --- Get today's keyword set (date-seeded rotation) ---
+    # --- Get today's keyword set (batch slice handled inside get_daily_keywords) ---
     all_keywords = get_daily_keywords()
-
-    # --- Batch slice ---
-    if IS_GITHUB_ACTIONS and BATCH > 0:
-        batch_size = len(all_keywords) // 6
-        start = (BATCH - 1) * batch_size
-        end = start + batch_size if BATCH < 6 else len(all_keywords)
-        all_keywords = all_keywords[start:end]
-        print("Batch " + str(BATCH) + ": keywords " + str(start + 1) + "-" + str(end))
 
     # --- Sleep config ---
     INTER_URL_SLEEP = (0.5, 1.0) if IS_GITHUB_ACTIONS else (3, 6)
@@ -1348,7 +1341,7 @@ def daily_scrape():
         if len(urls) == 0:
             consecutive_failures += 1
             if consecutive_failures >= 5:
-                print("  PROXY DEAD: 5 consecutive 0-result keywords — skipping to dork engine")
+                print("  PROXY DEAD: 5 consecutive 0-result keywords — skipping remaining keywords")
                 break
         else:
             consecutive_failures = 0
