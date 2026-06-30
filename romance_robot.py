@@ -65,16 +65,166 @@ BLOG_DIRECTORIES = [
 # PROXY & USER AGENT
 # ============================================
 
+import threading
+
 _proxy_env = os.environ.get('PROXY_LIST', '')
 PROXY_LIST = [p.strip().rstrip('/') for p in _proxy_env.split(',') if p.strip()]
+_PROXY_LOCK = threading.Lock()           # guards all PROXY_LIST mutations
+SKIP_DDG_NO_PROXY = False               # Set True at startup if 0 proxies found
+PROXY_DEPLETED = False                  # Set True mid-run if pool drops to 0
 
 _token_env = os.environ.get('GITHUB_TOKENS', '')
 GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
 
+# ============================================
+# FREE PROXY AUTO-FETCH (runs at startup if no paid proxies)
+# ============================================
+# Strategy: 13 sources → ~3,000-8,000 candidates
+# Parallel testing (50 threads, 2s timeout) → ~1,125 proxies tested in 45s
+# At 3-5% success rate → ~33-56 working proxies reliably
+# HARD RULE: NEVER use GitHub raw IP for DDG — skip batch if 0 proxies found
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+FREE_PROXY_SOURCES = [
+    # API sources (largest lists)
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
+    "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&protocols=http",
+    # GitHub maintained lists (most reliable uptime)
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+    "https://raw.githubusercontent.com/opsxcq/proxy-list/master/list.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list/data.txt",
+    "https://raw.githubusercontent.com/ALIILAPRO/Proxy/main/http.txt",
+    "https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt",
+    "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+    "https://raw.githubusercontent.com/HyperBeats/proxy-list/main/http.txt",
+]
+
+def _fetch_free_proxies():
+    """Download raw proxy lists from all sources in parallel."""
+    raw = []
+    def _fetch_one(source):
+        try:
+            r = requests.get(source, timeout=4)
+            # geonode returns JSON, others return plain text
+            if 'geonode' in source:
+                data = json.loads(r.text)
+                return [item['ip'] + ':' + item['port'] for item in data.get('data', [])]
+            return [p.strip() for p in r.text.strip().splitlines() if p.strip()]
+        except Exception:
+            return []
+
+    with ThreadPoolExecutor(max_workers=13) as ex:
+        for result in ex.map(_fetch_one, FREE_PROXY_SOURCES):
+            raw.extend(result)
+
+    # Deduplicate and format as http://IP:PORT
+    seen = set()
+    proxies = []
+    for p in raw:
+        p = p.strip()
+        if ':' in p and p not in seen:
+            seen.add(p)
+            proxies.append('http://' + p if not p.startswith('http') else p)
+    return proxies
+
+def _test_proxy(proxy):
+    """Fast liveness check — single URL, 2s timeout.
+    Dead proxies fail in <0.3s (connection refused) — 2s is generous for live ones."""
+    try:
+        r = requests.get('http://ip-api.com/json',
+                         proxies={'http': proxy, 'https': proxy},
+                         timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+def _load_working_free_proxies(target=80, time_limit=45):
+    """
+    Fetch + parallel-test proxies within time_limit seconds.
+    50 threads × 2s timeout → ~1,125 proxies tested in 45s.
+    At 5% success rate → ~56 working proxies.
+    At 3% success rate → ~33 working proxies.
+    Returns up to target working proxies.
+    """
+    print("  Fetching proxy lists from " + str(len(FREE_PROXY_SOURCES)) + " sources in parallel...")
+    raw = _fetch_free_proxies()
+    random.shuffle(raw)
+    # Test at most 1,200 candidates — 50 threads × 45s ÷ 2s = 1,125 tested
+    candidates = raw[:1200]
+    print("  " + str(len(raw)) + " candidates found — parallel-testing " + str(len(candidates)) + " (max 45s, 50 threads)...")
+
+    working = []
+    start = time.time()
+    tested = 0
+
+    executor = ThreadPoolExecutor(max_workers=50)
+    futures = {executor.submit(_test_proxy, p): p for p in candidates}
+    try:
+        for future in as_completed(futures):
+            if time.time() - start > time_limit or len(working) >= target:
+                break
+            tested += 1
+            try:
+                if future.result():
+                    working.append(futures[future])
+            except Exception:
+                pass
+            if tested % 200 == 0:
+                print("  Tested " + str(tested) + " | Working: " + str(len(working)) + " | " +
+                      str(int(time.time() - start)) + "s elapsed")
+    finally:
+        # cancel_futures=True (Python 3.9+) kills queued threads instantly — no waiting
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    elapsed = int(time.time() - start)
+    print("  RESULT: " + str(len(working)) + " working proxies found in " + str(elapsed) + "s")
+
+    # DDG smoke test — confirm at least one proxy reaches DDG over HTTPS
+    if working:
+        ddg_ok = False
+        for p in working[:5]:
+            try:
+                r = requests.get('https://duckduckgo.com/',
+                                 proxies={'http': p, 'https': p}, timeout=5)
+                if r.status_code == 200:
+                    ddg_ok = True
+                    break
+            except Exception:
+                continue
+        print("  DDG HTTPS via proxy: " + ("YES — safe to scrape" if ddg_ok else "NO — DDG may block these proxies"))
+    return working
+
 def get_next_proxy():
-    if not PROXY_LIST:
-        return None
-    return random.choice(PROXY_LIST)
+    """Thread-safe proxy selection. Returns None if pool is empty."""
+    with _PROXY_LOCK:
+        if not PROXY_LIST:
+            return None
+        return random.choice(PROXY_LIST)
+
+def _init_proxy_list():
+    """
+    Called once at startup. Auto-fetch free proxies if no paid ones.
+    HARD RULE: if no proxies found, set a global flag to skip DDG entirely.
+    GitHub's raw IP must NEVER be used for DDG — it will get blacklisted.
+    """
+    global PROXY_LIST, SKIP_DDG_NO_PROXY
+    SKIP_DDG_NO_PROXY = False
+    if PROXY_LIST:
+        return  # paid proxies present — use them
+    if IS_GITHUB_ACTIONS:
+        free = _load_working_free_proxies(target=80, time_limit=45)
+        if free:
+            PROXY_LIST.extend(free)
+            print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " free proxies loaded — DDG scraping enabled")
+        else:
+            SKIP_DDG_NO_PROXY = True
+            print("  CRITICAL: 0 working proxies — DDG keyword phase SKIPPED to protect GitHub IP")
+            print("  Only dork engine (proxy-required mode) and blog directories will run")
 
 try:
     _ua = UserAgent()
@@ -124,13 +274,17 @@ def load_visited_urls():
         return {}
 
 def is_url_stale(visited_dict, url):
-    """Returns True if URL should be skipped (visited recently)."""
+    """
+    Returns True if URL was visited RECENTLY (within TTL) → should be SKIPPED.
+    Returns False if never visited OR TTL has expired → safe to visit again.
+    NOTE: 'stale' here means 'too fresh to revisit' — skip when True.
+    """
     if url not in visited_dict:
         return False  # never visited — process it
     try:
         visited_date = datetime.strptime(visited_dict[url], '%Y-%m-%d')
         age_days = (datetime.now() - visited_date).days
-        return age_days < URL_TTL_DAYS  # stale if visited within TTL window
+        return age_days < URL_TTL_DAYS  # True = visited within 7 days = skip it
     except Exception:
         return False
 
@@ -507,8 +661,10 @@ def _index_to_keyword(idx):
 def get_daily_keywords():
     """
     Draw KEYWORDS_PER_DAY keywords from the 2.5M combinatorial space.
-    Date-seeded: same date = same keywords. Different every day for ~13.7 years.
+    Date-seeded: same date = same full set. Different every day for ~13.7 years.
     Zero memory footprint — each keyword is computed from its index.
+    In GitHub Actions: each batch gets its own 1/6 non-overlapping slice so
+    all 6 batches cover different keywords — no duplicate work across the day.
     """
     today = datetime.now().strftime('%Y-%m-%d')
     seed  = int(hashlib.md5(today.encode()).hexdigest(), 16)
@@ -518,10 +674,21 @@ def get_daily_keywords():
     indices  = rng.sample(range(_KW_TOTAL), n)
     keywords = [_index_to_keyword(i) for i in indices]
 
-    print("  Keyword pool    : {:,} combinatorial ({} × {} × {})".format(
-        _KW_TOTAL, len(KW_SUBGENRES), len(KW_ACTIVITIES), len(KW_MODIFIERS)))
-    print("  Selected today  : {} (date-seeded, exhausted in {:,} days)".format(
-        n, _KW_TOTAL // n))
+    # Slice into batch-specific segment — each of 6 batches gets ~84 unique keywords
+    if IS_GITHUB_ACTIONS and BATCH > 0:
+        batch_size = max(1, n // 6)
+        start = (BATCH - 1) * batch_size
+        end   = start + batch_size if BATCH < 6 else n  # Batch 6 gets remainder
+        keywords = keywords[start:end]
+        print("  Keyword pool    : {:,} combinatorial ({} × {} × {})".format(
+            _KW_TOTAL, len(KW_SUBGENRES), len(KW_ACTIVITIES), len(KW_MODIFIERS)))
+        print("  Batch {}/6 slice : keywords {:,}–{:,} ({} unique keywords this run)".format(
+            BATCH, start + 1, end, len(keywords)))
+    else:
+        print("  Keyword pool    : {:,} combinatorial ({} × {} × {})".format(
+            _KW_TOTAL, len(KW_SUBGENRES), len(KW_ACTIVITIES), len(KW_MODIFIERS)))
+        print("  Selected today  : {} (date-seeded, exhausted in {:,} days)".format(
+            n, _KW_TOTAL // n))
 
     return keywords
 
@@ -551,12 +718,15 @@ def ddg_search(query, region, num_results, retry):
     return results
 
 def search_google(keyword, num_results=10, retry=3):
+    # HARD BLOCK: no proxy at startup OR pool depleted mid-run → never hit DDG bare
+    if SKIP_DDG_NO_PROXY or PROXY_DEPLETED:
+        return []
     print("  Searching: " + keyword)
     all_results = []
     seen = set()
 
-    # 2 regions only (us-en + uk-en) — enough candidates, saves 2 DDG calls/keyword
-    for region in ['us-en', 'uk-en']:
+    regions = ['us-en', 'uk-en']
+    for region in regions:
         for url in ddg_search(keyword, region, num_results, retry):
             if url not in seen:
                 seen.add(url)
@@ -569,7 +739,7 @@ def search_google(keyword, num_results=10, retry=3):
         if url not in seen:
             seen.add(url)
             all_results.append(url)
-    time.sleep(random.uniform(0.5, 1))
+    time.sleep(random.uniform(3, 5) if not PROXY_LIST else random.uniform(0.5, 1))
 
     if len(all_results) == 0:
         print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
@@ -750,6 +920,10 @@ def dork_search(batch_dork_queries):
     Extracts emails from snippets directly — no page visit needed.
     Falls back to visiting the page only when snippet has no email.
     """
+    # HARD BLOCK: no proxy at startup OR pool depleted mid-run → never hit DDG bare
+    if SKIP_DDG_NO_PROXY or PROXY_DEPLETED:
+        print("  Dork engine SKIPPED — proxy pool empty (GitHub IP protected)")
+        return [], []
     print("\n--- Email Dork Engine running ---")
     print("  Dork queries this batch: " + str(len(batch_dork_queries)))
 
@@ -813,7 +987,9 @@ def dork_search(batch_dork_queries):
                         urls_found.append(url)
             time.sleep(random.uniform(1, 2))
         except Exception as e:
-            print("  Dork error (" + region + "): " + str(e)[:60])
+            err = str(e)[:60]
+            print("  Dork error (" + region + "): " + err)
+            _evict_proxy(proxy)   # pull dead proxy from pool if it caused the DDG failure
             time.sleep(random.uniform(2, 3))
         return emails_found, urls_found
 
@@ -965,7 +1141,22 @@ def is_reader_website(url):
 # PAGE SCRAPING
 # ============================================
 
-def scrape_page(url, headers, proxies):
+def _evict_proxy(proxy):
+    """Thread-safe removal of a dead proxy. Masks URL in logs. Sets PROXY_DEPLETED if pool empty."""
+    global PROXY_DEPLETED
+    if not proxy:
+        return
+    with _PROXY_LOCK:
+        if proxy in PROXY_LIST:
+            PROXY_LIST.remove(proxy)
+            masked = proxy.split('@')[-1][:20] if '@' in proxy else proxy[:20]
+            remaining = len(PROXY_LIST)
+            print("  PROXY EVICTED (" + str(remaining) + " remaining): ..." + masked)
+            if remaining == 0:
+                PROXY_DEPLETED = True
+                print("  WARNING: All proxies exhausted mid-run — DDG calls halted to protect GitHub IP")
+
+def scrape_page(url, headers, proxies, proxy_str=None):
     emails = []
     try:
         response = requests.get(url, headers=headers, proxies=proxies, timeout=5)
@@ -977,20 +1168,21 @@ def scrape_page(url, headers, proxies):
             if '@' in email:
                 emails.append(email)
     except Exception as e:
-        err = str(e)[:40]
-        if 'ProxyError' in err or '402' in err or '407' in err:
-            print("  PROXY ERR: " + err)
+        err = str(e)[:60]
+        if 'ProxyError' in err or '402' in err or '407' in err or 'Connection' in err:
+            print("  PROXY ERR: " + err[:40])
+            _evict_proxy(proxy_str)   # pull dead proxy out immediately
     return emails
 
 def visit_website(url):
     headers = {'User-Agent': get_random_user_agent()}
     proxy = get_next_proxy()
     proxies = {"http": proxy, "https": proxy} if proxy else None
-    emails = scrape_page(url, headers, proxies)
+    emails = scrape_page(url, headers, proxies, proxy_str=proxy)
     # Only visit /contact if main page had no emails — saves ~50% of HTTP calls
     if not emails:
         base = url.rstrip('/')
-        emails += scrape_page(base + '/contact', headers, proxies)
+        emails += scrape_page(base + '/contact', headers, proxies, proxy_str=proxy)
     return list(set(emails))
 
 # ============================================
@@ -1047,6 +1239,9 @@ def daily_scrape():
     print("ROMANCE READER EMAIL ROBOT - SELF-SUSTAINING ENGINE")
     print("Date: " + datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     print("=" * 60)
+
+    # ── Init proxy list FIRST so diagnostics shows correct count ──
+    _init_proxy_list()
     print_startup_diagnostics()
 
     # ── Adaptive engine: MUST run before get_daily_keywords so expansion affects count ──
@@ -1083,11 +1278,19 @@ def daily_scrape():
     print("=" * 60)
 
     # --- Source 1: DDG multi-region + modifier + blog searches ---
+    consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
-        urls = search_google(keyword, num_results=10, retry=3)
+        urls = search_google(keyword, num_results=10, retry=1)
         total_websites += len(urls)
+        if len(urls) == 0:
+            consecutive_failures += 1
+            if consecutive_failures >= 5:
+                print("  PROXY DEAD: 5 consecutive 0-result keywords — skipping to dork engine")
+                break
+        else:
+            consecutive_failures = 0
 
         visited_this_keyword = 0
         for url in urls:
@@ -1120,10 +1323,19 @@ def daily_scrape():
             save_master_emails(all_emails)
             try:
                 import subprocess
+                # Inject GITHUB_TOKEN into remote URL so push works from inside the script
+                _gh_token = os.environ.get('GITHUB_TOKEN', '')
+                _gh_repo  = os.environ.get('GITHUB_REPOSITORY', '')
+                if _gh_token and _gh_repo:
+                    _remote = 'https://x-access-token:' + _gh_token + '@github.com/' + _gh_repo + '.git'
+                    subprocess.run(['git', 'remote', 'set-url', 'origin', _remote], capture_output=True)
                 subprocess.run(['git', 'add', 'master_emails.txt', 'visited_urls.json'], capture_output=True)
                 subprocess.run(['git', 'commit', '-m', 'bot: mid-run checkpoint [skip ci]'], capture_output=True)
-                subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True)
-                print("  Checkpoint committed (" + str(len(all_emails)) + " emails so far)")
+                r = subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True, text=True)
+                if r.returncode == 0:
+                    print("  Checkpoint committed (" + str(len(all_emails)) + " emails so far)")
+                else:
+                    print("  Checkpoint push failed: " + r.stderr[:60])
             except Exception as e:
                 print("  Checkpoint skipped: " + str(e)[:40])
 
@@ -1181,51 +1393,12 @@ def daily_scrape():
             print("  [DIR] Visiting: " + url[:70])
             emails = visit_website(url)
             mark_visited(visited_urls, url)
-
             if emails:
                 print("  Found " + str(len(emails)) + " email(s)!")
                 all_emails.extend(emails)
-
             time.sleep(random.uniform(*INTER_URL_SLEEP))
 
-    save_visited_urls(visited_urls)
-
-    all_emails = clean_emails(all_emails)
-    all_emails = list(set(all_emails))
-
-    analyze_emails(all_emails)
-
-    new_email_count = save_master_emails(all_emails)
-
-    # Record yield for adaptive engine (runs each batch, accumulates daily total)
-    record_batch_yield(new_email_count)
-
-    filename = "romance_readers_" + datetime.now().strftime('%Y%m%d') + "_batch" + str(BATCH) + ".txt"
-    try:
-        with open(filename, 'w') as f:
-            f.write("# ROMANCE READER EMAILS\n")
-            f.write("# Date  : " + datetime.now().strftime('%B %d, %Y') + "\n")
-            f.write("# Batch : " + str(BATCH) + "\n")
-            f.write("# New emails today      : " + str(len(all_emails)) + "\n")
-            f.write("# Added to master list  : " + str(new_email_count) + "\n")
-            f.write("#" + "=" * 50 + "\n\n")
-            for email in sorted(all_emails):
-                f.write(email + '\n')
-    except Exception as e:
-        print("Warning: could not write output file: " + str(e))
-
-    save_run_date()
-
-    print("\n" + "=" * 60)
-    print("FINAL STATISTICS:")
-    print("  Emails found today      : " + str(len(all_emails)))
-    print("  Added to master list    : " + str(new_email_count))
-    print("  Websites visited        : " + str(total_websites - skipped_ttl - skipped_blocked))
-    print("  Skipped (TTL - recent)  : " + str(skipped_ttl))
-    print("  Skipped (blocked site)  : " + str(skipped_blocked))
-    print("=" * 60)
-
-    if len(all_emails) < 100:
+    # --- Final save and    if len(all_emails) < 100:
         print("LOW: Check DIAGNOSTICS above — proxy or DDG issue")
     elif len(all_emails) < 400:
         print("BUILDING: Growing across batches toward 750")
@@ -1235,20 +1408,6 @@ def daily_scrape():
         print("TARGET REACHED: 750+ emails today!")
     print("=" * 60)
 
-    return all_emails
 
-# ============================================
-# START
-# ============================================
-
-if __name__ == "__main__":
-    if already_ran_today() and not IS_GITHUB_ACTIONS:
-        print("=" * 60)
-        print("ALREADY RAN TODAY - Come back tomorrow!")
-        print("Date: " + datetime.now().strftime('%Y-%m-%d'))
-        print("=" * 60)
-    else:
-        daily_scrape()
-
-    if not IS_GITHUB_ACTIONS:
-        input("\nPress ENTER to close...")
+if __name__ == '__main__':
+    daily_scrape()
