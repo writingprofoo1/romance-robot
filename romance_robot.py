@@ -133,29 +133,34 @@ def _fetch_free_proxies():
     return proxies
 
 def _test_proxy(proxy):
-    """Fast liveness check — single URL, 2s timeout.
-    Dead proxies fail in <0.3s (connection refused) — 2s is generous for live ones."""
+    """
+    Basic HTTPS liveness check against a neutral target.
+    DDG blocks most free proxies at homepage level even when the proxy is HTTPS-capable.
+    Proxies that fail DDG specifically get evicted at scrape time via _evict_proxy().
+    2s timeout: dead proxies fail in <0.3s, live ones respond in <1s.
+    """
     try:
-        r = requests.get('http://ip-api.com/json',
+        r = requests.get('https://httpbin.org/ip',
                          proxies={'http': proxy, 'https': proxy},
                          timeout=2)
         return r.status_code == 200
     except Exception:
         return False
 
-def _load_working_free_proxies(target=80, time_limit=45):
+def _load_working_free_proxies(target=150, time_limit=45):
     """
     Fetch + parallel-test proxies within time_limit seconds.
     50 threads × 2s timeout → ~1,125 proxies tested in 45s.
-    At 5% success rate → ~56 working proxies.
-    At 3% success rate → ~33 working proxies.
+    target=150: fetch more to account for DDG-specific failures evicted at scrape time.
+    At 5% success rate → ~56 working proxies minimum.
+    At 3% success rate → ~33 working proxies minimum.
     Returns up to target working proxies.
     """
     print("  Fetching proxy lists from " + str(len(FREE_PROXY_SOURCES)) + " sources in parallel...")
     raw = _fetch_free_proxies()
     random.shuffle(raw)
-    # Test at most 1,200 candidates — 50 threads × 45s ÷ 2s = 1,125 tested
-    candidates = raw[:1200]
+    # Test up to 2,000 candidates — larger pool compensates for DDG evictions at scrape time
+    candidates = raw[:2000]
     print("  " + str(len(raw)) + " candidates found — parallel-testing " + str(len(candidates)) + " (max 45s, 50 threads)...")
 
     working = []
@@ -182,21 +187,8 @@ def _load_working_free_proxies(target=80, time_limit=45):
         executor.shutdown(wait=False, cancel_futures=True)
 
     elapsed = int(time.time() - start)
-    print("  RESULT: " + str(len(working)) + " working proxies found in " + str(elapsed) + "s")
-
-    # DDG smoke test — confirm at least one proxy reaches DDG over HTTPS
-    if working:
-        ddg_ok = False
-        for p in working[:5]:
-            try:
-                r = requests.get('https://duckduckgo.com/',
-                                 proxies={'http': p, 'https': p}, timeout=5)
-                if r.status_code == 200:
-                    ddg_ok = True
-                    break
-            except Exception:
-                continue
-        print("  DDG HTTPS via proxy: " + ("YES — safe to scrape" if ddg_ok else "NO — DDG may block these proxies"))
+    print("  RESULT: " + str(len(working)) + " HTTPS-capable proxies found in " + str(elapsed) + "s")
+    print("  NOTE: Proxies confirmed for basic HTTPS — DDG failures evicted at scrape time")
     return working
 
 def get_next_proxy():
@@ -217,7 +209,7 @@ def _init_proxy_list():
     if PROXY_LIST:
         return  # paid proxies present — use them
     if IS_GITHUB_ACTIONS:
-        free = _load_working_free_proxies(target=80, time_limit=45)
+        free = _load_working_free_proxies(target=150, time_limit=45)
         if free:
             PROXY_LIST.extend(free)
             print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " free proxies loaded — DDG scraping enabled")
@@ -1401,22 +1393,10 @@ def daily_scrape():
                 all_emails.extend(emails)
             time.sleep(random.uniform(*INTER_URL_SLEEP))
 
-<<<<<<< Updated upstream
-    # --- Final save and    if len(all_emails) < 100:
-        print("LOW: Check DIAGNOSTICS above — proxy or DDG issue")
-    elif len(all_emails) < 400:
-        print("BUILDING: Growing across batches toward 750")
-    elif len(all_emails) < 750:
-        print("GOOD: Heading toward 750+")
-    else:
-        print("TARGET REACHED: 750+ emails today!")
-    print("=" * 60)
-
-=======
     # --- Final save and report ---
     all_emails = clean_emails(all_emails)
     new_email_count = save_master_emails(all_emails)
-    save_yield_tracker(yield_tracker)
+    record_batch_yield(new_email_count)
 
     print("=" * 60)
     print("BATCH COMPLETE")
@@ -1436,8 +1416,6 @@ def daily_scrape():
     else:
         print("TARGET REACHED: 750+ emails today!")
     print("=" * 60)
-
->>>>>>> Stashed changes
 
 if __name__ == '__main__':
     daily_scrape()
