@@ -76,6 +76,18 @@ PROXY_DEPLETED = False                  # Set True mid-run if pool drops to 0
 _token_env = os.environ.get('GITHUB_TOKENS', '')
 GITHUB_TOKENS = [t.strip() for t in _token_env.split(',') if t.strip()]
 
+# Module-level scraper deadline — set by daily_scrape(), checked anywhere including dork_search()
+_SCRAPER_DEADLINE = None  # float (time.time() + seconds) or None = no limit
+
+def _out_of_time():
+    """Returns True if the soft deadline has passed. Safe to call from any function."""
+    if _SCRAPER_DEADLINE is None:
+        return False
+    if time.time() >= _SCRAPER_DEADLINE:
+        print("  SOFT TIMEOUT: 82 min reached — saving and exiting for auto-commit")
+        return True
+    return False
+
 # ============================================
 # FREE PROXY AUTO-FETCH (runs at startup if no paid proxies)
 # ============================================
@@ -1019,6 +1031,10 @@ def dork_search(batch_dork_queries):
         return emails_found, urls_found
 
     for idx, query in enumerate(batch_dork_queries):
+        if _out_of_time():
+            print("  Dork engine stopped early — soft timeout reached at query " + str(idx + 1) + "/" + str(len(batch_dork_queries)))
+            break
+
         # Primary region (geo-matched)
         primary = pick_dork_region(query)
         em, ur = run_dork_query(query, primary)
@@ -1028,9 +1044,10 @@ def dork_search(batch_dork_queries):
         # Secondary region (cross-region for higher coverage)
         secondary = SECONDARY_REGION.get(primary, 'us-en')
         if secondary != primary:
-            em2, ur2 = run_dork_query(query, secondary)
-            direct_emails.extend(em2)
-            fallback_urls.extend(ur2)
+            if not _out_of_time():
+                em2, ur2 = run_dork_query(query, secondary)
+                direct_emails.extend(em2)
+                fallback_urls.extend(ur2)
 
         if (idx + 1) % 10 == 0:
             print("  Dork progress: " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries, " + str(len(direct_emails)) + " emails found")
@@ -1267,18 +1284,9 @@ def daily_scrape():
 
     # Soft timeout — exit all loops at 82 min so auto-commit always gets its window
     # GitHub hard-kills at 90 min; 8 min buffer covers auto-commit + cache + artifact steps
-    SCRAPER_SOFT_TIMEOUT = 82 * 60  # seconds
-    _scraper_start = time.time()
-
-    def _time_left():
-        return SCRAPER_SOFT_TIMEOUT - (time.time() - _scraper_start)
-
-    def _out_of_time():
-        remaining = _time_left()
-        if remaining <= 0:
-            print("  SOFT TIMEOUT: 82 min reached — saving and exiting for auto-commit")
-            return True
-        return False
+    global _SCRAPER_DEADLINE
+    _SCRAPER_DEADLINE = time.time() + (82 * 60)
+    _scraper_start = time.time()  # kept for per-source timing
 
     # ── Init proxy list FIRST so diagnostics shows correct count ──
     _init_proxy_list()
@@ -1310,6 +1318,7 @@ def daily_scrape():
     print("=" * 60)
 
     # --- Source 1: Email Dork Engine (runs FIRST — fastest email/min source) ---
+    _t_dork_start = time.time()
     all_dork_queries = generate_dork_queries()
     if IS_GITHUB_ACTIONS and BATCH > 0:
         dork_batch_size = len(all_dork_queries) // 6
@@ -1320,8 +1329,11 @@ def daily_scrape():
         batch_dork_queries = all_dork_queries
 
     dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
+    _t_dork_elapsed = int(time.time() - _t_dork_start)
 
     # Save dork emails immediately — protected before keyword loop runs
+    # clean_emails first so checkpoint never writes junk (admin@, example.com etc.) to disk
+    dork_emails = clean_emails(dork_emails)
     all_emails.extend(dork_emails)
     if dork_emails:
         save_master_emails(all_emails)
@@ -1345,12 +1357,13 @@ def daily_scrape():
         time.sleep(random.uniform(*INTER_URL_SLEEP))
 
     # --- Source 2: DDG multi-region + modifier + blog searches ---
+    _t_kw_start = time.time()
     consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
         if _out_of_time():
             break
-        # Top-up proxy pool every 10 keywords if running low
-        if (idx % 10 == 0) and IS_GITHUB_ACTIONS:
+        # Top-up proxy pool every 10 keywords if running low (skip idx=0 — pool is fresh)
+        if (idx > 0 and idx % 10 == 0) and IS_GITHUB_ACTIONS:
             _maybe_topup_proxies()
 
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
@@ -1418,7 +1431,10 @@ def daily_scrape():
         else:
             time.sleep(random.uniform(*KEYWORD_SLEEP))
 
+    _t_kw_elapsed = int(time.time() - _t_kw_start)
+
     # --- Source 3: Blog directories (Batch 1 only, capped at 60 URLs) ---
+    _t_dir_start = time.time()
     if not IS_GITHUB_ACTIONS or BATCH == 1:
         directory_urls = scrape_blog_directories()
         directory_urls = directory_urls[:60]  # cap — prevents Batch 1 running 3+ hrs
@@ -1443,6 +1459,12 @@ def daily_scrape():
             time.sleep(random.uniform(*INTER_URL_SLEEP))
 
     # --- Final save and report ---
+    _t_dir_elapsed = int(time.time() - _t_dir_start)
+    _t_total_elapsed = int(time.time() - _scraper_start)
+
+    # Persist all URL tracking (fallback + blog dir visits) before exit
+    save_visited_urls(visited_urls)
+
     all_emails = clean_emails(all_emails)
     new_email_count = save_master_emails(all_emails)
     record_batch_yield(new_email_count)
@@ -1454,7 +1476,14 @@ def daily_scrape():
     print("  Websites visited        : " + str(total_websites - skipped_ttl - skipped_blocked))
     print("  Skipped (TTL - recent)  : " + str(skipped_ttl))
     print("  Skipped (blocked site)  : " + str(skipped_blocked))
+    print("  --- Time breakdown ---")
+    print("  Dork engine             : " + str(_t_dork_elapsed) + "s")
+    print("  Keyword loop            : " + str(_t_kw_elapsed) + "s")
+    print("  Blog directories        : " + str(_t_dir_elapsed) + "s")
+    print("  Total elapsed           : " + str(_t_total_elapsed) + "s / " + str(int(_t_total_elapsed / 60)) + "m")
     print("=" * 60)
+
+    analyze_emails(all_emails)
 
     if len(all_emails) < 100:
         print("LOW: Check DIAGNOSTICS above — proxy or DDG issue")
