@@ -360,15 +360,37 @@ def load_master_emails():
     except Exception:
         return set()
 
+EMAIL_LOG_FILE = "emails_log.txt"
+
 def save_master_emails(new_emails):
     existing = load_master_emails()
     combined = existing | set(new_emails)
+    truly_new = combined - existing  # emails added this call only
     try:
         with open(MASTER_EMAILS_FILE, 'w') as f:
             for email in sorted(combined):
                 f.write(email + '\n')
     except Exception:
         pass
+
+    # Append truly new emails to the date-separated log
+    if truly_new:
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            # Check if today's header already exists in the log
+            header = '===== ' + today + ' ====='
+            header_exists = False
+            if os.path.exists(EMAIL_LOG_FILE):
+                with open(EMAIL_LOG_FILE, 'r') as f:
+                    header_exists = any(header in line for line in f)
+            with open(EMAIL_LOG_FILE, 'a') as f:
+                if not header_exists:
+                    f.write('\n' + header + '\n')
+                for email in sorted(truly_new):
+                    f.write(email + '\n')
+        except Exception:
+            pass
+
     return len(combined) - len(existing)
 
 
@@ -1415,7 +1437,7 @@ def daily_scrape():
                 if _gh_token and _gh_repo:
                     _remote = 'https://x-access-token:' + _gh_token + '@github.com/' + _gh_repo + '.git'
                     subprocess.run(['git', 'remote', 'set-url', 'origin', _remote], capture_output=True)
-                subprocess.run(['git', 'add', 'master_emails.txt', 'visited_urls.json'], capture_output=True)
+                subprocess.run(['git', 'add', 'master_emails.txt', 'visited_urls.json', 'emails_log.txt'], capture_output=True)
                 subprocess.run(['git', 'commit', '-m', 'bot: mid-run checkpoint [skip ci]'], capture_output=True)
                 r = subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True, text=True)
                 if r.returncode == 0:

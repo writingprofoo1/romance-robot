@@ -85,7 +85,7 @@ jobs:
           git config user.name "romance-robot[bot]"
           git config user.email "romance-robot@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git add master_emails.txt visited_urls.json yield_tracker.json 2>/dev/null || true
+          git add master_emails.txt visited_urls.json yield_tracker.json emails_log.txt 2>/dev/null || true
           git diff --cached --quiet && echo "Nothing new to commit" || git commit -m "bot: batch ${{ steps.batch.outputs.batch }} results [skip ci]"
           git push origin main 2>/dev/null || echo "Push skipped - no changes or conflict"
 
