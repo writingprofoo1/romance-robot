@@ -212,8 +212,8 @@ def get_next_proxy():
 
 def _init_proxy_list():
     """
-    Called once at startup. Validates paid proxies if present — if >80% are dead,
-    discards them and auto-fetches free proxies instead.
+    Called once at startup. Validates paid proxies in parallel if present.
+    Removes dead ones, keeps alive ones, supplements with free proxies if pool < 20.
     HARD RULE: if no proxies found, set a global flag to skip DDG entirely.
     GitHub's raw IP must NEVER be used for DDG — it will get blacklisted.
     """
@@ -221,34 +221,49 @@ def _init_proxy_list():
     SKIP_DDG_NO_PROXY = False
 
     if PROXY_LIST:
-        # Validate a sample of paid proxies before trusting them
+        # Validate sample in parallel — same speed as free proxy testing, no startup penalty
         sample = PROXY_LIST[:10]
-        print("  Validating " + str(len(sample)) + " paid proxies from secret...")
-        alive = sum(1 for p in sample if _test_proxy(p))
+        print("  Validating " + str(len(sample)) + " paid proxies in parallel...")
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            results = list(ex.map(_test_proxy, sample))
+        alive_proxies = [p for p, ok in zip(sample, results) if ok]
+        dead_proxies  = set(p for p, ok in zip(sample, results) if not ok)
+        alive = len(alive_proxies)
         print("  Paid proxy check: " + str(alive) + "/" + str(len(sample)) + " alive")
-        if alive >= 2:
+
+        # Remove confirmed-dead proxies from pool immediately
+        with _PROXY_LOCK:
+            PROXY_LIST[:] = [p for p in PROXY_LIST if p not in dead_proxies]
+        print("  Removed " + str(len(dead_proxies)) + " dead proxies — " + str(len(PROXY_LIST)) + " remaining")
+
+        if len(PROXY_LIST) >= 20:
             print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " paid proxies accepted")
-            return  # paid proxies healthy — use them
-        else:
-            print("  WARNING: Paid proxies are dead — discarding and fetching free proxies")
-            PROXY_LIST.clear()
+            return  # pool healthy — use them as-is
+
+        # Pool too thin — supplement with free proxies
+        print("  Pool thin (" + str(len(PROXY_LIST)) + ") — supplementing with free proxies...")
 
     if IS_GITHUB_ACTIONS:
         free = _load_working_free_proxies(target=150, time_limit=45)
         if free:
-            PROXY_LIST.extend(free)
-            print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " free proxies loaded — DDG scraping enabled")
-        else:
+            with _PROXY_LOCK:
+                existing = set(PROXY_LIST)
+                new_only = [p for p in free if p not in existing]
+                PROXY_LIST.extend(new_only)
+            print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " proxies ready (paid + free) — DDG scraping enabled")
+        elif not PROXY_LIST:
             SKIP_DDG_NO_PROXY = True
             print("  CRITICAL: 0 working proxies — DDG keyword phase SKIPPED to protect GitHub IP")
             print("  Only dork engine (proxy-required mode) and blog directories will run")
+        else:
+            print("  Free proxy fetch failed — continuing with " + str(len(PROXY_LIST)) + " paid proxies")
 
 _TOPUP_IN_PROGRESS = False  # prevents concurrent top-up calls
 
 def _maybe_topup_proxies():
     """
-    Called every 10 keywords in the keyword loop.
-    If pool drops to ≤10, refetch proxies (30s cap) to keep scraping alive.
+    Called every 10 keywords OR immediately when PROXY_DEPLETED=True.
+    If pool drops to ≤10 or is depleted, refetch free proxies (30s cap) to keep scraping alive.
     Single-threaded context only — no lock needed on the flag itself.
     """
     global PROXY_DEPLETED, _TOPUP_IN_PROGRESS
@@ -386,21 +401,48 @@ def save_master_emails(new_emails):
     except Exception:
         pass
 
-    # Append truly new emails to the date-separated log
+    # Append truly new emails to the date-separated log (keeps last 30 days only)
     if truly_new:
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            # Check if today's header already exists in the log
             header = '===== ' + today + ' ====='
-            header_exists = False
+
+            # Read existing log, parse into sections keyed by date header
+            sections = {}   # {header_line: [email lines]}
+            order    = []   # insertion order of headers
+            current  = None
             if os.path.exists(EMAIL_LOG_FILE):
                 with open(EMAIL_LOG_FILE, 'r') as f:
-                    header_exists = any(header in line for line in f)
-            with open(EMAIL_LOG_FILE, 'a') as f:
-                if not header_exists:
-                    f.write('\n' + header + '\n')
-                for email in sorted(truly_new):
-                    f.write(email + '\n')
+                    for line in f:
+                        line = line.rstrip('\n')
+                        if line.startswith('=====') and line.endswith('====='):
+                            current = line
+                            if current not in sections:
+                                sections[current] = []
+                                order.append(current)
+                        elif current and line:
+                            sections[current].append(line)
+
+            # Add today's new emails
+            if header not in sections:
+                sections[header] = []
+                order.append(header)
+            existing_today = set(sections[header])
+            for email in sorted(truly_new):
+                if email not in existing_today:
+                    sections[header].append(email)
+
+            # Trim to last 30 days
+            if len(order) > 30:
+                order = order[-30:]
+                sections = {k: sections[k] for k in order if k in sections}
+
+            # Rewrite log
+            with open(EMAIL_LOG_FILE, 'w') as f:
+                for hdr in order:
+                    f.write('\n' + hdr + '\n')
+                    for email in sections[hdr]:
+                        f.write(email + '\n')
         except Exception:
             pass
 
