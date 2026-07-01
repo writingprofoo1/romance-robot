@@ -212,14 +212,27 @@ def get_next_proxy():
 
 def _init_proxy_list():
     """
-    Called once at startup. Auto-fetch free proxies if no paid ones.
+    Called once at startup. Validates paid proxies if present — if >80% are dead,
+    discards them and auto-fetches free proxies instead.
     HARD RULE: if no proxies found, set a global flag to skip DDG entirely.
     GitHub's raw IP must NEVER be used for DDG — it will get blacklisted.
     """
     global PROXY_LIST, SKIP_DDG_NO_PROXY
     SKIP_DDG_NO_PROXY = False
+
     if PROXY_LIST:
-        return  # paid proxies present — use them
+        # Validate a sample of paid proxies before trusting them
+        sample = PROXY_LIST[:10]
+        print("  Validating " + str(len(sample)) + " paid proxies from secret...")
+        alive = sum(1 for p in sample if _test_proxy(p))
+        print("  Paid proxy check: " + str(alive) + "/" + str(len(sample)) + " alive")
+        if alive >= 2:
+            print("  PROXY_LIST: " + str(len(PROXY_LIST)) + " paid proxies accepted")
+            return  # paid proxies healthy — use them
+        else:
+            print("  WARNING: Paid proxies are dead — discarding and fetching free proxies")
+            PROXY_LIST.clear()
+
     if IS_GITHUB_ACTIONS:
         free = _load_working_free_proxies(target=150, time_limit=45)
         if free:
@@ -1384,9 +1397,10 @@ def daily_scrape():
     for idx, keyword in enumerate(all_keywords):
         if _out_of_time():
             break
-        # Top-up proxy pool every 10 keywords if running low (skip idx=0 — pool is fresh)
-        if (idx > 0 and idx % 10 == 0) and IS_GITHUB_ACTIONS:
-            _maybe_topup_proxies()
+        # Top-up proxy pool every 10 keywords OR immediately if pool is depleted
+        if IS_GITHUB_ACTIONS:
+            if PROXY_DEPLETED or (idx > 0 and idx % 10 == 0):
+                _maybe_topup_proxies()
 
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
