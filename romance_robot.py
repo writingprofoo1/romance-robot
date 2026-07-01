@@ -53,12 +53,41 @@ DAILY_MODIFIERS = [
 ]
 
 # Romance blog directories — bypasses search engine entirely
+# 30 sources → each batch gets 5 unique directories → no TTL conflict across batches
 BLOG_DIRECTORIES = [
+    # Feedspot niche pages (most reliable — always lists blog URLs with hrefs)
     "https://blog.feedspot.com/romance_book_blogs/",
     "https://blog.feedspot.com/romance_book_review_blogs/",
-    "https://alltop.com/romance",
+    "https://blog.feedspot.com/paranormal_romance_blogs/",
+    "https://blog.feedspot.com/historical_romance_blogs/",
+    "https://blog.feedspot.com/contemporary_romance_blogs/",
+    "https://blog.feedspot.com/regency_romance_blogs/",
+    "https://blog.feedspot.com/erotic_romance_blogs/",
+    "https://blog.feedspot.com/book_review_blogs/",
+    "https://blog.feedspot.com/book_blogs/",
+    "https://blog.feedspot.com/chick_lit_blogs/",
+    "https://blog.feedspot.com/ya_book_blogs/",
+    "https://blog.feedspot.com/christian_fiction_blogs/",
+    "https://blog.feedspot.com/fantasy_book_blogs/",
+    "https://blog.feedspot.com/book_club_blogs/",
+    "https://blog.feedspot.com/women_fiction_blogs/",
+    # General book blog directories
     "https://www.thebookbloggerdirectory.com/",
     "https://www.bookbloggerlist.com/",
+    "https://alltop.com/romance",
+    "https://www.freshfiction.com/review-bloggers/",
+    "https://www.theromancetribune.com/",
+    # Community & review hubs
+    "https://dearauthor.com/features/book-links/",
+    "https://smartbitchestrashybooks.com/resources/",
+    "https://www.heroesandheartbreakers.com/",
+    "https://www.iheartromancebooks.com/",
+    "https://www.shereadsromancebooks.com/",
+    "https://www.romancejunkies.com/reviewers.php",
+    "https://yabookscentral.com/reviewers/",
+    "https://www.chicklit.us/authors/",
+    "https://www.writerspace.com/links/",
+    "https://www.romancereaders.com/",
 ]
 
 # ============================================
@@ -1138,8 +1167,10 @@ def dork_search(batch_dork_queries):
 # BLOG DIRECTORY SCRAPING
 # ============================================
 
-def scrape_blog_directories():
-    print("\n--- Scraping blog directories ---")
+def scrape_blog_directories(directories=None):
+    if directories is None:
+        directories = BLOG_DIRECTORIES
+    print("\n--- Scraping blog directories (" + str(len(directories)) + " sources) ---")
     found_urls = []
     seen = set()
     headers = {'User-Agent': get_random_user_agent()}
@@ -1151,7 +1182,7 @@ def scrape_blog_directories():
         'tiktok.com', 'tumblr.com',
     ]
 
-    for directory_url in BLOG_DIRECTORIES:
+    for directory_url in directories:
         try:
             proxy = get_next_proxy()
             proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -1511,11 +1542,20 @@ def daily_scrape():
 
     _t_kw_elapsed = int(time.time() - _t_kw_start)
 
-    # --- Source 3: Blog directories (Batch 1 only, capped at 60 URLs) ---
+    # --- Source 3: Blog directories (all batches — each gets unique slice of 5) ---
     _t_dir_start = time.time()
-    if not IS_GITHUB_ACTIONS or BATCH == 1:
-        directory_urls = scrape_blog_directories()
-        directory_urls = directory_urls[:60]  # cap — prevents Batch 1 running 3+ hrs
+    if True:
+        # Slice 30 directories into 6 non-overlapping groups of 5 — one per batch
+        if IS_GITHUB_ACTIONS and BATCH > 0:
+            dir_batch_size = max(1, len(BLOG_DIRECTORIES) // 6)
+            dir_start = (BATCH - 1) * dir_batch_size
+            dir_end   = dir_start + dir_batch_size if BATCH < 6 else len(BLOG_DIRECTORIES)
+            batch_dirs = BLOG_DIRECTORIES[dir_start:dir_end]
+            print("  Blog dir slice  : Batch " + str(BATCH) + " gets dirs " + str(dir_start+1) + "–" + str(dir_end))
+        else:
+            batch_dirs = BLOG_DIRECTORIES
+        directory_urls = scrape_blog_directories(batch_dirs)
+        directory_urls = directory_urls[:60]  # cap per batch
         total_websites += len(directory_urls)
 
         for url in directory_urls:
