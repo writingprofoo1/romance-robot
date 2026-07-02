@@ -208,7 +208,7 @@ def _load_working_free_proxies(target=150, time_limit=45):
     start = time.time()
     tested = 0
 
-    executor = ThreadPoolExecutor(max_workers=50)
+    executor = ThreadPoolExecutor(max_workers=100)
     futures = {executor.submit(_test_proxy, p): p for p in candidates}
     try:
         for future in as_completed(futures):
@@ -306,7 +306,7 @@ def _maybe_topup_proxies():
     print("  PROXY LOW (" + str(remaining) + " remaining) — topping up mid-run...")
     _TOPUP_IN_PROGRESS = True
     try:
-        fresh = _load_working_free_proxies(target=50, time_limit=30)
+        fresh = _load_working_free_proxies(target=100, time_limit=45)
         if fresh:
             with _PROXY_LOCK:
                 existing = set(PROXY_LIST)
@@ -855,8 +855,14 @@ def ddg_search(query, region, num_results, retry):
             break
         except Exception as e:
             attempt += 1
-            print("  DDG error (" + region + ", attempt " + str(attempt) + "): " + str(e)[:60])
-            _evict_proxy(proxy)  # dead proxy — remove from pool immediately
+            err_str = str(e)[:80]
+            print("  DDG error (" + region + ", attempt " + str(attempt) + "): " + err_str)
+            # Only evict if proxy connectivity is dead — DDG rate limits / CAPTCHA keep proxy alive
+            _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'RemoteDisconnected',
+                                   'Connection refused', 'Cannot connect', '407',
+                                   'Tunnel connection failed', 'CONNECT tunnel')
+            if any(x in err_str for x in _PROXY_CONN_ERRORS):
+                _evict_proxy(proxy)
             time.sleep(random.uniform(2, 4))
     return results
 
@@ -1130,9 +1136,14 @@ def dork_search(batch_dork_queries):
                         urls_found.append(url)
             time.sleep(random.uniform(1, 2))
         except Exception as e:
-            err = str(e)[:60]
+            err = str(e)[:80]
             print("  Dork error (" + region + "): " + err)
-            _evict_proxy(proxy)   # pull dead proxy from pool if it caused the DDG failure
+            # Only evict on proxy connectivity death — DDG rate limits keep proxy alive for other calls
+            _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'RemoteDisconnected',
+                                   'Connection refused', 'Cannot connect', '407',
+                                   'Tunnel connection failed', 'CONNECT tunnel')
+            if any(x in err for x in _PROXY_CONN_ERRORS):
+                _evict_proxy(proxy)
             time.sleep(random.uniform(2, 3))
         return emails_found, urls_found
 
