@@ -1370,17 +1370,23 @@ BLOCKED_DOMAINS = [
     'targetbooks', 'walmart.com', 'ebay.com', 'etsy.com',
     'nextchapterbooksellers', 'thirdplacebooks', 'powells.com',
     'indiebound.org', 'booksamillion.com', 'chapters.indigo.ca',
-    # Commercial book platforms
-    'goodreads.com', 'bookbub.com', 'overdrive.com', 'libby.com',
+    # Commercial book platforms (goodreads/reddit NOT blocked — community paths allowed via scraper)
+    'bookbub.com', 'overdrive.com', 'libby.com',
     'scribd.com', 'wattpad.com', 'royalroad.com', 'webnovel.com',
     'netgalley.com', 'edelweiss', 'library',
+    # Block goodreads book/author pages — allow group/topic/user via scraper
+    'goodreads.com/book/', 'goodreads.com/work/', 'goodreads.com/author/',
+    'goodreads.com/shelf/', 'goodreads.com/list/', 'goodreads.com/series/',
+    'goodreads.com/quotes/', 'goodreads.com/review/',
+    # Block reddit listing pages — allow specific post/comment pages via scraper
+    'reddit.com/r/romance/new', 'reddit.com/r/romance/hot',
     # Commercial club/event platforms
     'meetup.com', 'eventbrite.com', 'bookclubs.com', 'bookclubz.com',
     'literati.com', 'reese', 'swell', 'libro.fm',
     # Social media
     'facebook.com', 'instagram.com', 'twitter.com', 'tiktok.com',
     'youtube.com', 'pinterest.com', 'linkedin.com', 'snapchat.com',
-    'reddit.com', 'discord.com', 'telegram.org',
+    'discord.com', 'telegram.org',
     # News / media
     'forbes.com', 'buzzfeed.com', 'huffpost.com', 'theguardian.com',
     'nytimes.com', 'washingtonpost.com', 'bbc.com', 'cnn.com',
@@ -1523,6 +1529,163 @@ def analyze_emails(email_list):
         rating = "Excellent!" if pct > 70 else ("Good - improving" if pct > 50 else "Needs better keywords")
         print("  Rating          : " + rating)
         print("=" * 60)
+
+
+# ============================================
+# COMMUNITY SOURCES (Layer 3)
+# Reddit JSON API + Goodreads groups + LibraryThing
+# No proxy needed for Reddit — public JSON API
+# High volume: new posts added daily, sustainable long-term source
+# ============================================
+
+# 12 Reddit searches sliced across 6 batches (2 per batch)
+REDDIT_SEARCHES = [
+    # r/romancebooks — largest romance reader subreddit (500K+ members)
+    'https://old.reddit.com/r/romancebooks/search.json?q=arc+gmail&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/romancebooks/search.json?q=beta+reader+gmail&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/romancebooks/search.json?q=email+arc+reader&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/romancebooks/search.json?q=gmail+contact+romance&sort=new&limit=100&restrict_sr=1',
+    # Subgenre subreddits
+    'https://old.reddit.com/r/DarkRomance/search.json?q=gmail+arc&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/spicyromance/search.json?q=gmail+beta&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/HistoricalRomance/search.json?q=gmail+arc&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/paranormalromance/search.json?q=gmail&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/contemporaryromance/search.json?q=gmail+reader&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/MMRomance/search.json?q=gmail+arc&sort=new&limit=100&restrict_sr=1',
+    # Cross-subreddit ARC/beta reader searches
+    'https://old.reddit.com/r/romancebooks/search.json?q=street+team+gmail&sort=new&limit=100&restrict_sr=1',
+    'https://old.reddit.com/r/romancebooks/search.json?q=book+swap+gmail&sort=new&limit=100&restrict_sr=1',
+]
+
+# Goodreads group discussion pages — public, high email density in ARC/contact threads
+GOODREADS_GROUP_TOPICS = [
+    'https://www.goodreads.com/topic/group_folder/show/7022',    # Romance Book Club
+    'https://www.goodreads.com/topic/group_folder/show/1060',    # Romance Readers Anonymous
+    'https://www.goodreads.com/topic/group_folder/show/5085',    # Paranormal Romance
+    'https://www.goodreads.com/topic/group_folder/show/14005',   # Historical Romance
+    'https://www.goodreads.com/topic/group_folder/show/30820',   # Contemporary Romance
+    'https://www.goodreads.com/topic/group_folder/show/21312',   # Dark Romance
+    'https://www.goodreads.com/topic/group_folder/show/96798',   # ARC Readers
+    'https://www.goodreads.com/topic/group_folder/show/145789',  # Beta Readers Romance
+    'https://www.goodreads.com/topic/group_folder/show/220',     # Romance — general
+    'https://www.goodreads.com/topic/group_folder/show/51015',   # Spicy Romance
+    'https://www.goodreads.com/topic/group_folder/show/180543',  # Bookstagram Romance
+    'https://www.goodreads.com/topic/group_folder/show/82838',   # Street Team Sign-ups
+]
+
+# LibraryThing romance groups — public, members post contact info
+LIBRARYTHING_GROUPS = [
+    'https://www.librarything.com/groups/romance',
+    'https://www.librarything.com/groups/romancereaders',
+    'https://www.librarything.com/groups/historicalromance',
+    'https://www.librarything.com/groups/paranormalromance',
+    'https://www.librarything.com/groups/arcreaders',
+    'https://www.librarything.com/groups/betareaders',
+]
+
+
+def scrape_reddit_json(batch_searches):
+    """
+    Scrapes Reddit romance subreddits via public JSON API.
+    No proxy needed — Reddit's public API is open and rate-limit friendly with 1-2s delays.
+    Returns emails extracted from post titles + bodies + flair.
+    """
+    print("\n--- Reddit Community Sources (" + str(len(batch_searches)) + " searches) ---")
+    emails_found = []
+    seen = set()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+    }
+    for url in batch_searches:
+        if _out_of_time():
+            break
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            data = r.json()
+            posts = data.get('data', {}).get('children', [])
+            batch_emails = []
+            for post in posts:
+                pd = post.get('data', {})
+                text = pd.get('title', '') + ' ' + pd.get('selftext', '') + ' ' + pd.get('url', '')
+                for e in find_emails(text):
+                    if e not in seen:
+                        seen.add(e)
+                        batch_emails.append(e)
+                        print("  REDDIT HIT: " + e)
+            emails_found.extend(batch_emails)
+            sub = url.split('/r/')[1].split('/')[0] if '/r/' in url else 'reddit'
+            print("  r/" + sub + ": " + str(len(posts)) + " posts → " + str(len(batch_emails)) + " emails")
+            time.sleep(random.uniform(2, 3))
+        except Exception as e:
+            print("  Reddit error: " + str(e)[:60])
+            time.sleep(2)
+    print("  Reddit total: " + str(len(emails_found)) + " emails")
+    return emails_found
+
+
+def scrape_goodreads_groups(batch_groups):
+    """
+    Scrapes Goodreads group discussion topic pages.
+    These are public pages — no login needed.
+    Uses proxy to avoid rate limiting.
+    """
+    print("\n--- Goodreads Group Sources (" + str(len(batch_groups)) + " groups) ---")
+    emails_found = []
+    seen = set()
+    headers = {'User-Agent': get_random_user_agent()}
+    for url in batch_groups:
+        if _out_of_time():
+            break
+        try:
+            proxy = get_next_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            r = requests.get(url, headers=headers, proxies=proxies, timeout=8)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            text = soup.get_text()
+            batch_emails = []
+            for e in find_emails(text):
+                if e not in seen:
+                    seen.add(e)
+                    batch_emails.append(e)
+                    print("  GOODREADS HIT: " + e)
+            emails_found.extend(batch_emails)
+            print("  " + url[-50:] + " → " + str(len(batch_emails)) + " emails")
+            time.sleep(random.uniform(3, 5))
+        except Exception as ex:
+            print("  Goodreads error: " + str(ex)[:60])
+    print("  Goodreads total: " + str(len(emails_found)) + " emails")
+    return emails_found
+
+
+def scrape_librarything_groups(batch_groups):
+    """
+    Scrapes LibraryThing romance group pages.
+    Public pages, members post contact info.
+    """
+    print("\n--- LibraryThing Group Sources (" + str(len(batch_groups)) + " groups) ---")
+    emails_found = []
+    seen = set()
+    headers = {'User-Agent': get_random_user_agent()}
+    for url in batch_groups:
+        if _out_of_time():
+            break
+        try:
+            proxy = get_next_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            r = requests.get(url, headers=headers, proxies=proxies, timeout=8)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            text = soup.get_text()
+            for e in find_emails(text):
+                if e not in seen:
+                    seen.add(e)
+                    emails_found.append(e)
+                    print("  LIBRARYTHING HIT: " + e)
+            time.sleep(random.uniform(2, 3))
+        except Exception as ex:
+            print("  LibraryThing error: " + str(ex)[:60])
+    print("  LibraryThing total: " + str(len(emails_found)) + " emails")
+    return emails_found
 
 # ============================================
 # MAIN SCRAPER
@@ -1725,8 +1888,54 @@ def daily_scrape():
                 all_emails.extend(emails)
             time.sleep(random.uniform(*INTER_URL_SLEEP))
 
-    # --- Final save and report ---
     _t_dir_elapsed = int(time.time() - _t_dir_start)
+
+    # --- Source 4: Community sources — Reddit + Goodreads + LibraryThing ---
+    _t_community_start = time.time()
+    if not _out_of_time():
+        # Slice all community sources across 6 batches — each batch gets unique slice
+        if IS_GITHUB_ACTIONS and BATCH > 0:
+            # Reddit: 2 searches per batch
+            reddit_size = max(1, len(REDDIT_SEARCHES) // 6)
+            r_start = (BATCH - 1) * reddit_size
+            r_end   = r_start + reddit_size if BATCH < 6 else len(REDDIT_SEARCHES)
+            batch_reddit = REDDIT_SEARCHES[r_start:r_end]
+
+            # Goodreads: 2 groups per batch
+            gr_size  = max(1, len(GOODREADS_GROUP_TOPICS) // 6)
+            g_start  = (BATCH - 1) * gr_size
+            g_end    = g_start + gr_size if BATCH < 6 else len(GOODREADS_GROUP_TOPICS)
+            batch_gr = GOODREADS_GROUP_TOPICS[g_start:g_end]
+
+            # LibraryThing: 1 group per batch
+            lt_size  = max(1, len(LIBRARYTHING_GROUPS) // 6)
+            l_start  = (BATCH - 1) * lt_size
+            l_end    = l_start + lt_size if BATCH < 6 else len(LIBRARYTHING_GROUPS)
+            batch_lt = LIBRARYTHING_GROUPS[l_start:l_end]
+
+            print("  Community slice : Batch " + str(BATCH) +
+                  " — Reddit " + str(r_start+1) + "-" + str(r_end) +
+                  ", GR groups " + str(g_start+1) + "-" + str(g_end) +
+                  ", LT " + str(l_start+1) + "-" + str(l_end))
+        else:
+            batch_reddit = REDDIT_SEARCHES
+            batch_gr     = GOODREADS_GROUP_TOPICS
+            batch_lt     = LIBRARYTHING_GROUPS
+
+        community_emails = []
+        community_emails.extend(scrape_reddit_json(batch_reddit))
+        if not _out_of_time():
+            community_emails.extend(scrape_goodreads_groups(batch_gr))
+        if not _out_of_time():
+            community_emails.extend(scrape_librarything_groups(batch_lt))
+
+        community_emails = clean_emails(community_emails)
+        all_emails.extend(community_emails)
+        total_websites += len(batch_reddit) + len(batch_gr) + len(batch_lt)
+        print("  Community total : " + str(len(community_emails)) + " emails from Reddit + Goodreads + LibraryThing")
+    _t_community_elapsed = int(time.time() - _t_community_start)
+
+    # --- Final save and report ---
     _t_total_elapsed = int(time.time() - _scraper_start)
 
     # Persist all URL tracking (fallback + blog dir visits) before exit
@@ -1747,6 +1956,7 @@ def daily_scrape():
     print("  Dork engine             : " + str(_t_dork_elapsed) + "s")
     print("  Keyword loop            : " + str(_t_kw_elapsed) + "s")
     print("  Blog directories        : " + str(_t_dir_elapsed) + "s")
+    print("  Community sources       : " + str(_t_community_elapsed) + "s")
     print("  Total elapsed           : " + str(_t_total_elapsed) + "s / " + str(int(_t_total_elapsed / 60)) + "m")
     print("=" * 60)
 
