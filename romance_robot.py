@@ -840,18 +840,32 @@ def get_daily_keywords():
 # ============================================
 
 def ddg_search(query, region, num_results, retry):
+    """
+    Returns (urls, snippet_emails).
+    snippet_emails: emails extracted directly from DDG result snippets — no page visit needed.
+    urls: page URLs for follow-up visits when snippet has no email.
+    """
     results = []
-    seen = set()
+    snippet_emails = []
+    seen_urls = set()
+    seen_emails = set()
     attempt = 0
     while attempt < retry:
         try:
             proxy = get_next_proxy()
             with DDGS(proxy=proxy) as ddgs:
                 for r in ddgs.text(query, max_results=num_results, region=region):
-                    url = r['href']
-                    if url not in seen:
-                        seen.add(url)
+                    url = r.get('href', '')
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
                         results.append(url)
+                    # Extract emails directly from snippet — free hits, no page visit needed
+                    snippet = r.get('body', '') + ' ' + r.get('title', '')
+                    for e in find_emails(snippet):
+                        if e not in seen_emails:
+                            seen_emails.add(e)
+                            snippet_emails.append(e)
+                            print("  SNIPPET HIT: " + e)
             break
         except Exception as e:
             attempt += 1
@@ -864,37 +878,49 @@ def ddg_search(query, region, num_results, retry):
             if any(x in err_str for x in _PROXY_CONN_ERRORS):
                 _evict_proxy(proxy)
             time.sleep(random.uniform(2, 4))
-    return results
+    return results, snippet_emails
 
 def search_google(keyword, num_results=10, retry=3):
     # HARD BLOCK: no proxy at startup OR pool depleted mid-run → never hit DDG bare
     if SKIP_DDG_NO_PROXY or PROXY_DEPLETED:
-        return []
+        return [], []
     print("  Searching: " + keyword)
     all_results = []
+    all_snippet_emails = []
     seen = set()
+    seen_emails = set()
 
     regions = ['us-en', 'uk-en']
     for region in regions:
-        for url in ddg_search(keyword, region, num_results, retry):
+        urls, snip_emails = ddg_search(keyword, region, num_results, retry)
+        for url in urls:
             if url not in seen:
                 seen.add(url)
                 all_results.append(url)
+        for e in snip_emails:
+            if e not in seen_emails:
+                seen_emails.add(e)
+                all_snippet_emails.append(e)
         time.sleep(random.uniform(0.5, 1))
 
     # 1 blog-specific search — personal reader blogs
     blog_query = keyword + ' readers site:blogspot.com OR site:wordpress.com'
-    for url in ddg_search(blog_query, 'us-en', num_results, retry):
+    urls, snip_emails = ddg_search(blog_query, 'us-en', num_results, retry)
+    for url in urls:
         if url not in seen:
             seen.add(url)
             all_results.append(url)
+    for e in snip_emails:
+        if e not in seen_emails:
+            seen_emails.add(e)
+            all_snippet_emails.append(e)
     time.sleep(random.uniform(3, 5) if not PROXY_LIST else random.uniform(0.5, 1))
 
-    if len(all_results) == 0:
+    if len(all_results) == 0 and len(all_snippet_emails) == 0:
         print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
     else:
-        print("  Found " + str(len(all_results)) + " URLs")
-    return all_results
+        print("  Found " + str(len(all_results)) + " URLs, " + str(len(all_snippet_emails)) + " snippet emails")
+    return all_results, all_snippet_emails
 
 # ============================================
 # EMAIL DORK ENGINE (Layer 5)
@@ -1052,8 +1078,114 @@ def generate_dork_queries():
             tier7.append('"yahoo.com" "romance reader" ' + site)
         print("  DORK TIER 7 active: " + str(len(tier7)) + " extra-platform queries added")
 
+    # TIER 8: Fresh angles — patterns never run before, different surface area than tiers 1-6
+    tier8 = []
+
+    # 8A: Natural language email disclosure — readers writing their email naturally in text
+    tier8 += [
+        '"my email is" "romance" "gmail.com"',
+        '"my email is" "romance reader" gmail',
+        '"reach me at" "romance" "gmail.com"',
+        '"you can email me at" romance reader',
+        '"email me at" "romance book club" gmail',
+        '"drop me an email" "romance reader" gmail',
+        '"shoot me an email" romance gmail.com',
+        '"feel free to email" romance reader gmail',
+        '"get in touch" "romance reader" gmail.com',
+        '"send me an email" "romance" "gmail.com"',
+    ]
+
+    # 8B: Street team / fan team / ambassador pages — author websites, not blogs
+    tier8 += [
+        '"street team" romance "gmail.com"',
+        '"join my street team" romance gmail',
+        '"reader ambassador" romance "gmail.com"',
+        '"fan team" romance gmail.com join',
+        '"arc team" romance "gmail.com" apply',
+        '"review team" romance apply "gmail.com"',
+        '"beta team" romance "gmail.com"',
+        '"join the team" romance reader gmail',
+        '"reader group" romance author "gmail.com"',
+        '"launch team" romance "gmail.com"',
+    ]
+
+    # 8C: Book club join / application language — different from "book club contact"
+    tier8 += [
+        '"join our book club" romance "gmail.com"',
+        '"romance book club" "sign up" "gmail.com"',
+        '"book club application" romance gmail',
+        '"book club membership" romance gmail',
+        '"romance reading group" "join" gmail',
+        '"book club sign up" romance gmail.com',
+        '"virtual book club" romance "gmail.com"',
+        '"online book club" romance "gmail.com" join',
+    ]
+
+    # 8D: New platforms not in existing tiers
+    tier8 += [
+        '"gmail.com" "romance reader" site:substack.com',
+        '"gmail.com" "romance book" site:medium.com',
+        '"gmail.com" "romance reader" site:livejournal.com',
+        '"gmail.com" "romance" site:proboards.com',
+        '"gmail.com" "romance readers" site:forumotion.com',
+        '"gmail.com" "romance book club" site:wixsite.com',
+        '"gmail.com" "romance reader" site:weebly.com',
+        '"gmail.com" "romance" site:tapatalk.com',
+    ]
+
+    # 8E: New email providers — outlook, icloud, ymail barely used in current tiers
+    tier8 += [
+        '"outlook.com" "romance reader" site:blogspot.com',
+        '"outlook.com" "romance book club" site:wordpress.com',
+        '"outlook.com" "romance readers" "email me"',
+        '"outlook.com" "romance" "arc reader"',
+        '"icloud.com" "romance reader"',
+        '"icloud.com" "romance book club"',
+        '"ymail.com" "romance reader"',
+        '"ymail.com" "romance book club"',
+        '"protonmail.com" "romance reader"',
+    ]
+
+    # 8F: Geographic expansion — countries not in tier 6 (English-reading populations)
+    tier8 += [
+        '"gmail.com" "romance readers" Tanzania',
+        '"gmail.com" "romance reader" Zimbabwe',
+        '"gmail.com" "romance book club" Ethiopia',
+        '"gmail.com" "romance readers" Rwanda',
+        '"gmail.com" "romance readers" Pakistan',
+        '"gmail.com" "romance book club" Indonesia',
+        '"gmail.com" "romance reader" Trinidad',
+        '"gmail.com" "romance readers" Barbados',
+        '"gmail.com" "romance readers" site:com.pk',
+        '"gmail.com" "romance readers" site:co.tz',
+        '"gmail.com" "romance reader" "Caribbean"',
+        '"gmail.com" "romance readers" "East Africa"',
+    ]
+
+    # 8G: Reading challenge, buddy read, swap — action-specific language
+    tier8 += [
+        '"reading challenge" romance "gmail.com" 2025',
+        '"romance reading challenge" "email" gmail',
+        '"buddy read" romance "contact" "gmail.com"',
+        '"reading partner" romance "gmail.com"',
+        '"romance buddy read" gmail contact',
+        '"book swap" "romance" "outlook.com"',
+        '"romance" "TBR" "email" "gmail.com"',
+    ]
+
+    # 8H: ARC/review variants with different phrasing
+    tier8 += [
+        '"sensitivity reader" romance "gmail.com"',
+        '"review request" romance "outlook.com"',
+        '"arc request" romance "gmail.com" blog',
+        '"advanced reader" romance "gmail.com" contact',
+        '"request a review copy" romance gmail',
+        '"contact for arcs" romance "outlook.com"',
+        '"early reader" romance "gmail.com"',
+    ]
+
     # Ordered dedup: tier1 first = highest yield always runs in earliest batch
-    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7
+    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7 + tier8
     seen = set()
     deduped = []
     for q in ordered:
@@ -1232,8 +1364,8 @@ ALLOWED_DOMAINS = [
 
 # Hard block — never visit regardless
 BLOCKED_DOMAINS = [
-    # Publishers / retailers
-    'amazon.com', 'barnesandnoble.com', 'harlequin.com', 'bookshop.org',
+    # Publishers / retailers (amazon.co. catches .co.uk, .co.jp, .co.au etc.)
+    'amazon.com', 'amazon.co.', 'amzn.', 'barnesandnoble.com', 'harlequin.com', 'bookshop.org',
     'penguinrandomhouse.com', 'simonandschuster.com', 'macmillan.com',
     'targetbooks', 'walmart.com', 'ebay.com', 'etsy.com',
     'nextchapterbooksellers', 'thirdplacebooks', 'powells.com',
@@ -1263,7 +1395,8 @@ BLOCKED_DOMAINS = [
     'wikipedia.org', 'wikihow.com', 'britannica.com',
     # URL patterns
     '/images/', '/reel/', '/video/', '/watch?', '/tag/', '/category/',
-    '/page/', '/search?', '/topics/', '/lists/',
+    '/page/', '/search?', '/topics/', '/lists/', '/product/', '/shop/',
+    '/dp/', '/gp/', '/store/', '/item/', '/listing/',
 ]
 
 def is_reader_website(url):
@@ -1488,9 +1621,14 @@ def daily_scrape():
 
         print("\n[" + str(idx + 1) + "/" + str(len(all_keywords)) + "] " + keyword)
 
-        urls = search_google(keyword, num_results=10, retry=1)
+        urls, snippet_emails = search_google(keyword, num_results=10, retry=1)
+
+        # Collect snippet emails immediately — free hits with no page visit
+        if snippet_emails:
+            all_emails.extend(snippet_emails)
+
         total_websites += len(urls)
-        if len(urls) == 0:
+        if len(urls) == 0 and len(snippet_emails) == 0:
             consecutive_failures += 1
             if consecutive_failures >= 5:
                 print("  PROXY DEAD: 5 consecutive 0-result keywords — skipping remaining keywords")
