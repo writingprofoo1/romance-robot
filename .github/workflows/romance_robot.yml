@@ -41,17 +41,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Restore previous state
-        uses: actions/cache@v4.2.3
-        with:
-          path: |
-            visited_urls.json
-            master_emails.txt
-            yield_tracker.json
-          key: scraper-state-${{ runner.os }}
-          restore-keys: |
-            scraper-state-
-
       - name: Determine batch number
         id: batch
         run: |
@@ -88,15 +77,6 @@ jobs:
           git add master_emails.txt visited_urls.json yield_tracker.json emails_log.txt 2>/dev/null || true
           git diff --cached --quiet && echo "Nothing new to commit" || git commit -m "bot: batch ${{ steps.batch.outputs.batch }} results [skip ci]"
           git push origin main 2>/dev/null || echo "Push skipped - no changes or conflict"
-
-      - name: Save state cache
-        uses: actions/cache@v4.2.3
-        with:
-          path: |
-            visited_urls.json
-            master_emails.txt
-            yield_tracker.json
-          key: scraper-state-${{ runner.os }}
 
       - name: Upload today's results
         uses: actions/upload-artifact@v4.6.2
