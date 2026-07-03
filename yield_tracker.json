@@ -1,7 +1,9 @@
 {
-  "daily_yields": [],
+  "daily_yields": [
+    4
+  ],
   "baseline": 0,
   "expansion_level": 0,
-  "today_date": "2026-07-02",
-  "today_total": 4
+  "today_date": "2026-07-03",
+  "today_total": 2
 }
