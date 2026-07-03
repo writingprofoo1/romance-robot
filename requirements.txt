@@ -1,4 +1,4 @@
 requests
 beautifulsoup4
-ddgs
+ddgs==6.3.10
 fake-useragent

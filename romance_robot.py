@@ -1732,7 +1732,25 @@ def daily_scrape():
     print("Expansion level : " + str(expansion_level) + " (0=normal, 1=+kw, 2=+platforms, 3=+cache purge)")
     print("=" * 60)
 
-    # --- Source 1: Email Dork Engine (runs FIRST — fastest email/min source) ---
+    # --- Source 1: Reddit (FIRST — no proxy needed, guaranteed to always run) ---
+    # Reddit JSON API is open — completes in 2-3 min regardless of proxy state
+    _t_reddit_start = time.time()
+    if IS_GITHUB_ACTIONS and BATCH > 0:
+        reddit_size  = max(1, len(REDDIT_SEARCHES) // 6)
+        r_start      = (BATCH - 1) * reddit_size
+        r_end        = r_start + reddit_size if BATCH < 6 else len(REDDIT_SEARCHES)
+        batch_reddit = REDDIT_SEARCHES[r_start:r_end]
+    else:
+        batch_reddit = REDDIT_SEARCHES
+    reddit_emails = scrape_reddit_json(batch_reddit)
+    reddit_emails = clean_emails(reddit_emails)
+    all_emails.extend(reddit_emails)
+    if reddit_emails:
+        save_master_emails(all_emails)
+        print("  Reddit checkpoint: " + str(len(reddit_emails)) + " emails saved")
+    _t_reddit_elapsed = int(time.time() - _t_reddit_start)
+
+    # --- Source 2: Email Dork Engine ---
     _t_dork_start = time.time()
     all_dork_queries = generate_dork_queries()
     if IS_GITHUB_ACTIONS and BATCH > 0:
@@ -1746,8 +1764,6 @@ def daily_scrape():
     dork_emails, dork_fallback_urls = dork_search(batch_dork_queries)
     _t_dork_elapsed = int(time.time() - _t_dork_start)
 
-    # Save dork emails immediately — protected before keyword loop runs
-    # clean_emails first so checkpoint never writes junk (admin@, example.com etc.) to disk
     dork_emails = clean_emails(dork_emails)
     all_emails.extend(dork_emails)
     if dork_emails:
@@ -1771,7 +1787,62 @@ def daily_scrape():
             all_emails.extend(emails)
         time.sleep(random.uniform(*INTER_URL_SLEEP))
 
-    # --- Source 2: DDG multi-region + modifier + blog searches ---
+    # --- Source 3: Blog directories ---
+    _t_dir_start = time.time()
+    if IS_GITHUB_ACTIONS and BATCH > 0:
+        dir_batch_size = max(1, len(BLOG_DIRECTORIES) // 6)
+        dir_start = (BATCH - 1) * dir_batch_size
+        dir_end   = dir_start + dir_batch_size if BATCH < 6 else len(BLOG_DIRECTORIES)
+        batch_dirs = BLOG_DIRECTORIES[dir_start:dir_end]
+        print("  Blog dir slice  : Batch " + str(BATCH) + " gets dirs " + str(dir_start+1) + "–" + str(dir_end))
+    else:
+        batch_dirs = BLOG_DIRECTORIES
+    directory_urls = scrape_blog_directories(batch_dirs)
+    directory_urls = directory_urls[:60]
+    total_websites += len(directory_urls)
+    for url in directory_urls:
+        if _out_of_time():
+            break
+        if is_url_stale(visited_urls, url):
+            skipped_ttl += 1
+            continue
+        if not is_reader_website(url):
+            skipped_blocked += 1
+            continue
+        print("  [DIR] Visiting: " + url[:70])
+        emails = visit_website(url)
+        mark_visited(visited_urls, url)
+        if emails:
+            print("  Found " + str(len(emails)) + " email(s)!")
+            all_emails.extend(emails)
+        time.sleep(random.uniform(*INTER_URL_SLEEP))
+    _t_dir_elapsed = int(time.time() - _t_dir_start)
+
+    # --- Source 4: Goodreads + LibraryThing (before keyword loop) ---
+    _t_community_start = time.time()
+    if not _out_of_time():
+        if IS_GITHUB_ACTIONS and BATCH > 0:
+            gr_size  = max(1, len(GOODREADS_GROUP_TOPICS) // 6)
+            g_start  = (BATCH - 1) * gr_size
+            g_end    = g_start + gr_size if BATCH < 6 else len(GOODREADS_GROUP_TOPICS)
+            batch_gr = GOODREADS_GROUP_TOPICS[g_start:g_end]
+            lt_size  = max(1, len(LIBRARYTHING_GROUPS) // 6)
+            l_start  = (BATCH - 1) * lt_size
+            l_end    = l_start + lt_size if BATCH < 6 else len(LIBRARYTHING_GROUPS)
+            batch_lt = LIBRARYTHING_GROUPS[l_start:l_end]
+        else:
+            batch_gr = GOODREADS_GROUP_TOPICS
+            batch_lt = LIBRARYTHING_GROUPS
+        community_emails = []
+        community_emails.extend(scrape_goodreads_groups(batch_gr))
+        if not _out_of_time():
+            community_emails.extend(scrape_librarything_groups(batch_lt))
+        community_emails = clean_emails(community_emails)
+        all_emails.extend(community_emails)
+        print("  Goodreads+LT total: " + str(len(community_emails)) + " emails")
+    _t_community_elapsed = int(time.time() - _t_community_start)
+
+    # --- Source 5: DDG multi-region + modifier + blog searches (fills remaining time) ---
     _t_kw_start = time.time()
     consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
@@ -1854,93 +1925,10 @@ def daily_scrape():
 
     _t_kw_elapsed = int(time.time() - _t_kw_start)
 
-    # --- Source 3: Blog directories (all batches — each gets unique slice of 5) ---
-    _t_dir_start = time.time()
-    if True:
-        # Slice 30 directories into 6 non-overlapping groups of 5 — one per batch
-        if IS_GITHUB_ACTIONS and BATCH > 0:
-            dir_batch_size = max(1, len(BLOG_DIRECTORIES) // 6)
-            dir_start = (BATCH - 1) * dir_batch_size
-            dir_end   = dir_start + dir_batch_size if BATCH < 6 else len(BLOG_DIRECTORIES)
-            batch_dirs = BLOG_DIRECTORIES[dir_start:dir_end]
-            print("  Blog dir slice  : Batch " + str(BATCH) + " gets dirs " + str(dir_start+1) + "–" + str(dir_end))
-        else:
-            batch_dirs = BLOG_DIRECTORIES
-        directory_urls = scrape_blog_directories(batch_dirs)
-        directory_urls = directory_urls[:60]  # cap per batch
-        total_websites += len(directory_urls)
-
-        for url in directory_urls:
-            if _out_of_time():
-                break
-            if is_url_stale(visited_urls, url):
-                skipped_ttl += 1
-                continue
-            if not is_reader_website(url):
-                skipped_blocked += 1
-                continue
-
-            print("  [DIR] Visiting: " + url[:70])
-            emails = visit_website(url)
-            mark_visited(visited_urls, url)
-            if emails:
-                print("  Found " + str(len(emails)) + " email(s)!")
-                all_emails.extend(emails)
-            time.sleep(random.uniform(*INTER_URL_SLEEP))
-
-    _t_dir_elapsed = int(time.time() - _t_dir_start)
-
-    # --- Source 4: Community sources — Reddit + Goodreads + LibraryThing ---
-    _t_community_start = time.time()
-    if not _out_of_time():
-        # Slice all community sources across 6 batches — each batch gets unique slice
-        if IS_GITHUB_ACTIONS and BATCH > 0:
-            # Reddit: 2 searches per batch
-            reddit_size = max(1, len(REDDIT_SEARCHES) // 6)
-            r_start = (BATCH - 1) * reddit_size
-            r_end   = r_start + reddit_size if BATCH < 6 else len(REDDIT_SEARCHES)
-            batch_reddit = REDDIT_SEARCHES[r_start:r_end]
-
-            # Goodreads: 2 groups per batch
-            gr_size  = max(1, len(GOODREADS_GROUP_TOPICS) // 6)
-            g_start  = (BATCH - 1) * gr_size
-            g_end    = g_start + gr_size if BATCH < 6 else len(GOODREADS_GROUP_TOPICS)
-            batch_gr = GOODREADS_GROUP_TOPICS[g_start:g_end]
-
-            # LibraryThing: 1 group per batch
-            lt_size  = max(1, len(LIBRARYTHING_GROUPS) // 6)
-            l_start  = (BATCH - 1) * lt_size
-            l_end    = l_start + lt_size if BATCH < 6 else len(LIBRARYTHING_GROUPS)
-            batch_lt = LIBRARYTHING_GROUPS[l_start:l_end]
-
-            print("  Community slice : Batch " + str(BATCH) +
-                  " — Reddit " + str(r_start+1) + "-" + str(r_end) +
-                  ", GR groups " + str(g_start+1) + "-" + str(g_end) +
-                  ", LT " + str(l_start+1) + "-" + str(l_end))
-        else:
-            batch_reddit = REDDIT_SEARCHES
-            batch_gr     = GOODREADS_GROUP_TOPICS
-            batch_lt     = LIBRARYTHING_GROUPS
-
-        community_emails = []
-        community_emails.extend(scrape_reddit_json(batch_reddit))
-        if not _out_of_time():
-            community_emails.extend(scrape_goodreads_groups(batch_gr))
-        if not _out_of_time():
-            community_emails.extend(scrape_librarything_groups(batch_lt))
-
-        community_emails = clean_emails(community_emails)
-        all_emails.extend(community_emails)
-        total_websites += len(batch_reddit) + len(batch_gr) + len(batch_lt)
-        print("  Community total : " + str(len(community_emails)) + " emails from Reddit + Goodreads + LibraryThing")
-    _t_community_elapsed = int(time.time() - _t_community_start)
-
     # --- Final save and report ---
     _t_total_elapsed = int(time.time() - _scraper_start)
 
-    # Persist all URL tracking (fallback + blog dir visits) before exit
     save_visited_urls(visited_urls)
-
     all_emails = clean_emails(all_emails)
     new_email_count = save_master_emails(all_emails)
     record_batch_yield(new_email_count)
@@ -1953,10 +1941,11 @@ def daily_scrape():
     print("  Skipped (TTL - recent)  : " + str(skipped_ttl))
     print("  Skipped (blocked site)  : " + str(skipped_blocked))
     print("  --- Time breakdown ---")
-    print("  Dork engine             : " + str(_t_dork_elapsed) + "s")
-    print("  Keyword loop            : " + str(_t_kw_elapsed) + "s")
-    print("  Blog directories        : " + str(_t_dir_elapsed) + "s")
-    print("  Community sources       : " + str(_t_community_elapsed) + "s")
+    print("  Reddit (Source 1)       : " + str(_t_reddit_elapsed) + "s")
+    print("  Dork engine (Source 2)  : " + str(_t_dork_elapsed) + "s")
+    print("  Blog dirs (Source 3)    : " + str(_t_dir_elapsed) + "s")
+    print("  Goodreads+LT (Source 4) : " + str(_t_community_elapsed) + "s")
+    print("  Keywords (Source 5)     : " + str(_t_kw_elapsed) + "s")
     print("  Total elapsed           : " + str(_t_total_elapsed) + "s / " + str(int(_t_total_elapsed / 60)) + "m")
     print("=" * 60)
 
