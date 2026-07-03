@@ -1184,8 +1184,78 @@ def generate_dork_queries():
         '"early reader" romance "gmail.com"',
     ]
 
+    # TIER 9: Campus/student + ARC platform angles — zero saturation, never scraped before
+    tier9 = []
+
+    # 9A: University/campus romance book clubs — dense email source, completely untapped
+    tier9 += [
+        '"romance book club" site:.edu',
+        '"romance readers" site:.edu "gmail.com"',
+        '"romance" "reading group" site:.edu email',
+        '"romance novels" "book club" site:.edu contact',
+        '"romance" "book club" site:.edu "sign up"',
+        '"college romance" "book club" gmail.com',
+        '"university" "romance readers" "gmail.com"',
+        '"campus book club" romance gmail',
+        '"romance" "reading group" "university" "gmail.com"',
+        '"romance" site:.edu "gmail.com" "book club"',
+    ]
+
+    # 9B: Student personal emails on romance communities
+    tier9 += [
+        '"student" "romance reader" "gmail.com"',
+        '"college student" "romance" "gmail.com"',
+        '"student" "arc reader" "romance" gmail',
+        '"student blogger" "romance" "gmail.com"',
+        '"college" "romance books" "contact" "gmail.com"',
+        '"university student" "romance reader" gmail',
+        '"student" "romance book club" email gmail',
+    ]
+
+    # 9C: ARC reader platform dorks — people sharing reviewer profiles publicly
+    tier9 += [
+        '"arc reader" "romance" "contact me" "gmail.com"',
+        '"beta reader" "romance" "apply" "gmail.com" 2025',
+        '"romance arc reader" "gmail.com" blog',
+        '"netgalley" "romance" "arc" "gmail.com"',
+        '"booksprout" "romance reader" "gmail.com"',
+        '"storyorigin" "romance" reader gmail',
+        '"arc reader for hire" romance gmail',
+        '"romance reviewer" "contact" "gmail.com" arc',
+        '"i review romance" "gmail.com"',
+        '"romance book reviewer" "contact me" gmail',
+        '"looking for arc readers" romance gmail.com',
+        '"request a review" "romance" gmail.com',
+        '"booksprout.co" romance reader email',
+        '"romance" "arc team" apply gmail.com',
+    ]
+
+    # 9D: Hiring/recruitment sites for romance reader roles (beta/ARC/sensitivity)
+    tier9 += [
+        '"sensitivity reader" "romance" apply gmail.com',
+        '"romance" "paid reader" gmail.com contact',
+        '"freelance" "romance reader" "gmail.com"',
+        '"romance" "book reviewer" "paid" gmail.com',
+        '"romance arc" "paid" "gmail.com"',
+        '"romance" "street team" "compensation" gmail',
+    ]
+
+    # 9E: Geographic expansion — untouched English-reading markets
+    tier9 += [
+        '"gmail.com" "romance readers" "Trinidad and Tobago"',
+        '"gmail.com" "romance book club" "Sierra Leone"',
+        '"gmail.com" "romance readers" Cameroon',
+        '"gmail.com" "romance book club" "Ivory Coast"',
+        '"gmail.com" "romance readers" Senegal',
+        '"gmail.com" "romance readers" "Dominican Republic"',
+        '"gmail.com" "romance book club" Guyana',
+        '"gmail.com" "romance readers" Belize',
+        '"gmail.com" "romance readers" "Papua New Guinea"',
+        '"gmail.com" "romance book club" Zambia',
+    ]
+
     # Ordered dedup: tier1 first = highest yield always runs in earliest batch
-    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7 + tier8
+    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7 + tier8 + tier9
     seen = set()
     deduped = []
     for q in ordered:
@@ -1479,7 +1549,30 @@ def visit_website(url):
     proxy = get_next_proxy()
     proxies = {"http": proxy, "https": proxy} if proxy else None
     emails = scrape_page(url, headers, proxies, proxy_str=proxy)
-    # Only visit /contact if main page had no emails — saves ~50% of HTTP calls
+
+    # For blog platforms: also visit dated post pages — comment sections have reader emails
+    is_blog = any(p in url.lower() for p in ['blogspot.com', 'wordpress.com', 'blogger.com', 'typepad.com'])
+    if is_blog:
+        try:
+            r = requests.get(url, headers=headers, proxies=proxies, timeout=5)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            base_domain = url.split('/')[2]
+            post_links = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if base_domain not in href:
+                    continue
+                # Match dated post URL patterns (/2022/ /2023/ /2024/ /2025/ /2026/)
+                if any(f'/{y}/' in href for y in ['2022', '2023', '2024', '2025', '2026']):
+                    if href not in post_links:
+                        post_links.append(href)
+            for post_url in post_links[:2]:  # max 2 post pages per blog visit
+                post_emails = scrape_page(post_url, headers, proxies, proxy_str=proxy)
+                emails.extend(post_emails)
+        except Exception:
+            pass
+
+    # /contact fallback if still no emails
     if not emails:
         base = url.rstrip('/')
         emails += scrape_page(base + '/contact', headers, proxies, proxy_str=proxy)
@@ -1581,6 +1674,34 @@ LIBRARYTHING_GROUPS = [
     'https://www.librarything.com/groups/paranormalromance',
     'https://www.librarything.com/groups/arcreaders',
     'https://www.librarything.com/groups/betareaders',
+]
+
+# Romance community forum/blog listing pages — high comment density with reader emails
+# Strategy: fetch listing → extract post links → visit posts for comment section emails
+ROMANCE_FORUM_PAGES = [
+    'https://dearauthor.com/features/letters-of-opinion/',
+    'https://dearauthor.com/book-reviews/',
+    'https://dearauthor.com/features/reader-questions/',
+    'https://smartbitchestrashybooks.com/blog/',
+    'https://allaboutromance.com/author-letters/',
+    'https://allaboutromance.com/reader-letters/',
+    'https://www.heroesandheartbreakers.com/',
+    'https://www.bookcrossing.com/forum/9/',
+    'https://www.romancejunkies.com/articles.php',
+    'https://freshfiction.com/community.php',
+    'https://www.theromancereviews.com/community.php',
+    'https://www.iheartromancebooks.com/',
+]
+
+# ARC reader platform pages — people who explicitly signed up to read romance books
+ARC_READER_PLATFORMS = [
+    'https://www.arcsappealing.com/romance/',
+    'https://booksprout.co/reviewer/list?genre=romance',
+    'https://hiddengemsbooks.com/arc-reader-sign-up/',
+    'https://storyoriginapp.com/reader-groups?genre=romance',
+    'https://reedsy.com/discovery/books/romance',
+    'https://thebookishelf.com/arc-readers/',
+    'https://www.netgalley.com/widget/Romance',
 ]
 
 
@@ -1686,6 +1807,103 @@ def scrape_librarything_groups(batch_groups):
             print("  LibraryThing error: " + str(ex)[:60])
     print("  LibraryThing total: " + str(len(emails_found)) + " emails")
     return emails_found
+
+
+def scrape_forum_pages(batch_pages):
+    """
+    Scrape romance community forum/blog listing pages.
+    Fetches listing page → finds individual post/thread links → visits those for comment emails.
+    Comment sections are the highest-density email surface on these sites.
+    """
+    print("\n--- Romance Forums (" + str(len(batch_pages)) + " pages) ---")
+    emails_found = []
+    seen = set()
+    headers = {'User-Agent': get_random_user_agent()}
+
+    for listing_url in batch_pages:
+        if _out_of_time():
+            break
+        try:
+            proxy = get_next_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            r = requests.get(listing_url, headers=headers, proxies=proxies, timeout=8)
+            soup = BeautifulSoup(r.text, 'html.parser')
+
+            # Extract emails directly from listing page
+            for e in find_emails(soup.get_text()):
+                if e not in seen:
+                    seen.add(e)
+                    emails_found.append(e)
+                    print("  FORUM HIT: " + e)
+
+            # Find individual post/thread links on same domain
+            base_domain = '/'.join(listing_url.split('/')[:3])
+            post_links = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if not href.startswith('http'):
+                    href = base_domain + href if href.startswith('/') else ''
+                if not href or base_domain.split('//')[1] not in href:
+                    continue
+                skip = any(p in href for p in ['/tag/', '/category/', '/page/', '?s=', '#', '/author/'])
+                if not skip and href != listing_url and href not in post_links:
+                    post_links.append(href)
+
+            # Visit up to 5 post pages for comment section emails
+            for post_url in post_links[:5]:
+                if _out_of_time():
+                    break
+                try:
+                    pr = requests.get(post_url, headers=headers, proxies=proxies, timeout=6)
+                    for e in find_emails(BeautifulSoup(pr.text, 'html.parser').get_text()):
+                        if e not in seen:
+                            seen.add(e)
+                            emails_found.append(e)
+                            print("  FORUM COMMENT HIT: " + e)
+                    time.sleep(random.uniform(1, 2))
+                except Exception:
+                    pass
+
+            print("  " + listing_url[-60:] + " → " + str(len(emails_found)) + " total")
+            time.sleep(random.uniform(3, 5))
+        except Exception as ex:
+            print("  Forum error: " + str(ex)[:60])
+
+    print("  Forums total: " + str(len(emails_found)) + " emails")
+    return emails_found
+
+
+def scrape_arc_platforms(batch_pages):
+    """
+    Scrape ARC reader platform directories and recruitment pages.
+    These are readers who explicitly signed up to read and review romance books — warm prospects.
+    """
+    print("\n--- ARC Reader Platforms (" + str(len(batch_pages)) + " pages) ---")
+    emails_found = []
+    seen = set()
+    headers = {'User-Agent': get_random_user_agent()}
+
+    for url in batch_pages:
+        if _out_of_time():
+            break
+        try:
+            proxy = get_next_proxy()
+            proxies = {'http': proxy, 'https': proxy} if proxy else None
+            r = requests.get(url, headers=headers, proxies=proxies, timeout=8)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            for e in find_emails(soup.get_text()):
+                if e not in seen:
+                    seen.add(e)
+                    emails_found.append(e)
+                    print("  ARC HIT: " + e)
+            print("  " + url[-60:] + " → " + str(len(emails_found)) + " total")
+            time.sleep(random.uniform(2, 4))
+        except Exception as ex:
+            print("  ARC platform error: " + str(ex)[:60])
+
+    print("  ARC platforms total: " + str(len(emails_found)) + " emails")
+    return emails_found
+
 
 # ============================================
 # MAIN SCRAPER
@@ -1842,7 +2060,33 @@ def daily_scrape():
         print("  Goodreads+LT total: " + str(len(community_emails)) + " emails")
     _t_community_elapsed = int(time.time() - _t_community_start)
 
-    # --- Source 5: DDG multi-region + modifier + blog searches (fills remaining time) ---
+    # --- Source 6: Romance Forums + ARC Reader Platforms ---
+    _t_forum_start = time.time()
+    if not _out_of_time():
+        if IS_GITHUB_ACTIONS and BATCH > 0:
+            forum_size = max(1, len(ROMANCE_FORUM_PAGES) // 6)
+            f_start    = (BATCH - 1) * forum_size
+            f_end      = f_start + forum_size if BATCH < 6 else len(ROMANCE_FORUM_PAGES)
+            batch_forums = ROMANCE_FORUM_PAGES[f_start:f_end]
+            arc_size   = max(1, len(ARC_READER_PLATFORMS) // 6)
+            a_start    = (BATCH - 1) * arc_size
+            a_end      = a_start + arc_size if BATCH < 6 else len(ARC_READER_PLATFORMS)
+            batch_arc  = ARC_READER_PLATFORMS[a_start:a_end]
+        else:
+            batch_forums = ROMANCE_FORUM_PAGES
+            batch_arc    = ARC_READER_PLATFORMS
+        forum_emails = clean_emails(scrape_forum_pages(batch_forums))
+        all_emails.extend(forum_emails)
+        arc_emails = []
+        if not _out_of_time():
+            arc_emails = clean_emails(scrape_arc_platforms(batch_arc))
+            all_emails.extend(arc_emails)
+        if forum_emails or arc_emails:
+            save_master_emails(all_emails)
+            print("  Forum+ARC checkpoint: " + str(len(forum_emails) + len(arc_emails)) + " emails saved")
+    _t_forum_elapsed = int(time.time() - _t_forum_start)
+
+    # --- Source 5 (keyword loop): DDG multi-region + modifier + blog searches (fills remaining time) ---
     _t_kw_start = time.time()
     consecutive_failures = 0
     for idx, keyword in enumerate(all_keywords):
@@ -1872,7 +2116,7 @@ def daily_scrape():
 
         visited_this_keyword = 0
         for url in urls:
-            if visited_this_keyword >= 2:  # max 2 URL visits per keyword
+            if visited_this_keyword >= 5:  # max 5 URL visits per keyword
                 break
             if is_url_stale(visited_urls, url):
                 skipped_ttl += 1
@@ -1945,6 +2189,7 @@ def daily_scrape():
     print("  Dork engine (Source 2)  : " + str(_t_dork_elapsed) + "s")
     print("  Blog dirs (Source 3)    : " + str(_t_dir_elapsed) + "s")
     print("  Goodreads+LT (Source 4) : " + str(_t_community_elapsed) + "s")
+    print("  Forums+ARC (Source 6)   : " + str(_t_forum_elapsed) + "s")
     print("  Keywords (Source 5)     : " + str(_t_kw_elapsed) + "s")
     print("  Total elapsed           : " + str(_t_total_elapsed) + "s / " + str(int(_t_total_elapsed / 60)) + "m")
     print("=" * 60)
