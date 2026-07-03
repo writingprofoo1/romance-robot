@@ -363,7 +363,7 @@ def print_startup_diagnostics():
         print("  PROXY_LIST      : YES - " + str(len(PROXY_LIST)) + " proxies (" + masked + ")")
     else:
         print("  PROXY_LIST      : NO - page scraping uses direct connection (search via SearXNG, unaffected)")
-    print("  Search engine   : SearXNG (" + str(len(SEARXNG_INSTANCES)) + " public instances, no proxy needed)")
+    print("  Search engine   : SearXNG (" + str(len(SEARXNG_INSTANCES)) + " instances, 3 tried/query via proxy) + DDGS Lite fallback")
     print("  DDG regions     : " + str(DDG_REGIONS) + " (region-map logic only)")
     print("  Daily modifier  : " + get_daily_modifier())
     print("  Batch           : " + str(BATCH))
@@ -885,16 +885,21 @@ def _parse_searxng_response(r, max_results):
 def _ddgs_lite_search(query, max_results=10):
     """
     DDG Lite endpoint via proxy — hard fallback when all SearXNG instances fail.
-    backend='lite' hits lite.duckduckgo.com which is less rate-limited than html endpoint.
+    backend='lite' hits lite.duckduckgo.com — less rate-limited than html endpoint.
+    Hard 10s timeout via ThreadPoolExecutor so a hung DDGS call can't block the engine.
     """
     if not PROXY_LIST:
         return [], []
     proxy = get_next_proxy()
     if not proxy:
         return [], []
-    try:
+    def _run():
         with DDGS(proxy=proxy, verify=False) as ddgs_client:
-            results = list(ddgs_client.text(query, max_results=max_results, backend="lite"))
+            return list(ddgs_client.text(query, max_results=max_results, backend="lite"))
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_run)
+            results = future.result(timeout=10)  # 10s hard limit — never hangs
         urls = []
         snippet_emails = []
         for r in results:
@@ -926,8 +931,8 @@ def searxng_search(query, max_results=10):
         'Accept': 'application/json',
     }
     params = {'q': query, 'format': 'json', 'language': 'en-US'}
-    instances = SEARXNG_INSTANCES[:]
-    random.shuffle(instances)
+    # Only try 3 random instances — trying all 14 burns 100+ seconds per failed query
+    instances = random.sample(SEARXNG_INSTANCES, min(3, len(SEARXNG_INSTANCES)))
 
     for inst in instances:
         proxy = get_next_proxy()
@@ -936,11 +941,11 @@ def searxng_search(query, max_results=10):
             # Attempt 1: via proxy (hides Azure IP from SearXNG)
             try:
                 r = requests.get(inst + '/search', params=params, headers=headers,
-                                 proxies=proxies, timeout=8, verify=False)
+                                 proxies=proxies, timeout=4, verify=False)
             except Exception:
-                # Proxy failed to reach SearXNG → try direct
+                # Proxy failed → try direct (4s, not 8s)
                 r = requests.get(inst + '/search', params=params, headers=headers,
-                                 timeout=8, verify=False)
+                                 timeout=4, verify=False)
             if r.status_code != 200:
                 continue
             parsed = _parse_searxng_response(r, max_results)
@@ -950,7 +955,7 @@ def searxng_search(query, max_results=10):
         except Exception:
             continue  # instance unreachable — try next
 
-    # All SearXNG instances failed — fall back to DDG Lite via proxy
+    # All 3 instances failed — fall back to DDG Lite via proxy
     return _ddgs_lite_search(query, max_results)
 
 
@@ -1353,9 +1358,12 @@ def dork_search(batch_dork_queries):
     Extracts emails from snippets directly — no page visit needed.
     Falls back to visiting the page only when snippet has no email.
     """
-    # SearXNG handles search — no proxy needed, GitHub IP never touches DDG directly
-    print("\n--- Email Dork Engine running (SearXNG) ---")
+    # SearXNG handles search — routed via proxy, GitHub IP never touches DDG directly
+    print("\n--- Email Dork Engine running (SearXNG + DDGS Lite fallback) ---")
     print("  Dork queries this batch: " + str(len(batch_dork_queries)))
+    # Hard cap: dork engine may never consume more than 10 min of the 82-min budget
+    # Keywords are the main email source — dork must not starve them
+    _DORK_DEADLINE = time.time() + (10 * 60)
 
     direct_emails = []
     fallback_urls = []
@@ -1421,8 +1429,8 @@ def dork_search(batch_dork_queries):
         return emails_found, urls_found
 
     for idx, query in enumerate(batch_dork_queries):
-        if _out_of_time():
-            print("  Dork engine stopped early — soft timeout reached at query " + str(idx + 1) + "/" + str(len(batch_dork_queries)))
+        if _out_of_time() or time.time() >= _DORK_DEADLINE:
+            print("  Dork engine capped at 10 min — " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries done — handing time to keywords")
             break
 
         # Single call per query — SearXNG is region-agnostic, secondary call was duplicate
