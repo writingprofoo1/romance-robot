@@ -32,7 +32,7 @@ VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 YIELD_TRACKER_FILE = "yield_tracker.json"
 URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
-KEYWORDS_PER_DAY  = 500  # Full production mode
+KEYWORDS_PER_DAY  = 750  # Raised 500→750: SearXNG is faster than DDG, 82-min budget now fits more keywords
 
 # Adaptive engine thresholds
 TARGET_DAILY      = 750   # emails/day target
@@ -880,8 +880,7 @@ def searxng_search(query, max_results=10):
         try:
             r = requests.get(
                 inst + '/search',
-                params={'q': query, 'format': 'json', 'language': 'en-US',
-                        'engines': 'google,bing,duckduckgo,brave'},
+                params={'q': query, 'format': 'json', 'language': 'en-US'},
                 headers=headers,
                 timeout=8,
                 verify=False,
@@ -907,42 +906,42 @@ def searxng_search(query, max_results=10):
         except Exception:
             continue  # try next instance
 
+    print("  SearXNG: all instances failed for query")
     return [], []  # all instances failed
 
 
 def ddg_search(query, region, num_results, retry):
     """
     Returns (urls, snippet_emails).
-    Now uses SearXNG public instances — no proxy needed, no DDG rate-limit risk.
-    'region' param kept for interface compatibility but SearXNG uses language=en-US globally.
+    Now uses SearXNG — no proxy needed, no DDG rate-limit risk.
+    max_results bumped to 20 (SearXNG supports up to 50); num_results param preserved for interface compat.
     """
-    urls, snippet_emails = searxng_search(query, max_results=num_results)
+    urls, snippet_emails = searxng_search(query, max_results=max(20, num_results))
     for e in snippet_emails:
         print("  SNIPPET HIT: " + e)
     return urls, snippet_emails
 
 def search_google(keyword, num_results=10, retry=3):
-    # SearXNG handles search — no proxy needed (SearXNG proxies the engine calls)
+    # SearXNG handles search — region-agnostic, 1 call per query is sufficient
     print("  Searching: " + keyword)
     all_results = []
     all_snippet_emails = []
     seen = set()
     seen_emails = set()
 
-    regions = ['us-en', 'uk-en']
-    for region in regions:
-        urls, snip_emails = ddg_search(keyword, region, num_results, retry)
-        for url in urls:
-            if url not in seen:
-                seen.add(url)
-                all_results.append(url)
-        for e in snip_emails:
-            if e not in seen_emails:
-                seen_emails.add(e)
-                all_snippet_emails.append(e)
-        time.sleep(random.uniform(0.5, 1))
+    # Call 1: general keyword search
+    urls, snip_emails = ddg_search(keyword, 'us-en', num_results, retry)
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            all_results.append(url)
+    for e in snip_emails:
+        if e not in seen_emails:
+            seen_emails.add(e)
+            all_snippet_emails.append(e)
+    time.sleep(random.uniform(0.5, 1))
 
-    # 1 blog-specific search — personal reader blogs
+    # Call 2: blog-specific search — personal reader blogs (different query = different results)
     blog_query = keyword + ' readers site:blogspot.com OR site:wordpress.com'
     urls, snip_emails = ddg_search(blog_query, 'us-en', num_results, retry)
     for url in urls:
@@ -953,10 +952,10 @@ def search_google(keyword, num_results=10, retry=3):
         if e not in seen_emails:
             seen_emails.add(e)
             all_snippet_emails.append(e)
-    time.sleep(random.uniform(3, 5) if not PROXY_LIST else random.uniform(0.5, 1))
+    time.sleep(random.uniform(0.5, 1))
 
     if len(all_results) == 0 and len(all_snippet_emails) == 0:
-        print("  WARNING: 0 results — proxy may be blocked or PROXY_LIST empty")
+        print("  WARNING: 0 results — SearXNG returned nothing for this keyword")
     else:
         print("  Found " + str(len(all_results)) + " URLs, " + str(len(all_snippet_emails)) + " snippet emails")
     return all_results, all_snippet_emails
@@ -1382,19 +1381,11 @@ def dork_search(batch_dork_queries):
             print("  Dork engine stopped early — soft timeout reached at query " + str(idx + 1) + "/" + str(len(batch_dork_queries)))
             break
 
-        # Primary region (geo-matched)
+        # Single call per query — SearXNG is region-agnostic, secondary call was duplicate
         primary = pick_dork_region(query)
         em, ur = run_dork_query(query, primary)
         direct_emails.extend(em)
         fallback_urls.extend(ur)
-
-        # Secondary region (cross-region for higher coverage)
-        secondary = SECONDARY_REGION.get(primary, 'us-en')
-        if secondary != primary:
-            if not _out_of_time():
-                em2, ur2 = run_dork_query(query, secondary)
-                direct_emails.extend(em2)
-                fallback_urls.extend(ur2)
 
         if (idx + 1) % 10 == 0:
             print("  Dork progress: " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries, " + str(len(direct_emails)) + " emails found")
@@ -1872,7 +1863,10 @@ def scrape_forum_pages(batch_pages):
         try:
             proxy = get_next_proxy()
             proxies = {'http': proxy, 'https': proxy} if proxy else None
-            r = requests.get(listing_url, headers=headers, proxies=proxies, timeout=8, verify=False)
+            try:
+                r = requests.get(listing_url, headers=headers, proxies=proxies, timeout=8, verify=False)
+            except Exception:
+                r = requests.get(listing_url, headers=headers, timeout=8, verify=False)
             soup = BeautifulSoup(r.text, 'html.parser')
 
             # Extract emails directly from listing page
@@ -1935,7 +1929,10 @@ def scrape_arc_platforms(batch_pages):
         try:
             proxy = get_next_proxy()
             proxies = {'http': proxy, 'https': proxy} if proxy else None
-            r = requests.get(url, headers=headers, proxies=proxies, timeout=8, verify=False)
+            try:
+                r = requests.get(url, headers=headers, proxies=proxies, timeout=8, verify=False)
+            except Exception:
+                r = requests.get(url, headers=headers, timeout=8, verify=False)
             soup = BeautifulSoup(r.text, 'html.parser')
             for e in find_emails(soup.get_text()):
                 if e not in seen:
@@ -1981,7 +1978,7 @@ def daily_scrape():
 
     # --- Sleep config ---
     INTER_URL_SLEEP = (0.5, 1.0) if IS_GITHUB_ACTIONS else (3, 6)
-    KEYWORD_SLEEP   = (1, 2)     if IS_GITHUB_ACTIONS else (12, 18)
+    KEYWORD_SLEEP   = (0.3, 0.5) if IS_GITHUB_ACTIONS else (12, 18)  # SearXNG needs no rate-limit delay
     COOLDOWN_SLEEP  = (40, 60)
 
     all_emails = []
