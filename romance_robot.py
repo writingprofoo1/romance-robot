@@ -854,7 +854,7 @@ def ddg_search(query, region, num_results, retry):
         try:
             proxy = get_next_proxy()
             with DDGS(proxy=proxy) as ddgs:
-                for r in ddgs.text(query, max_results=num_results, region=region):
+                for r in ddgs.text(query, max_results=num_results, region=region, backend="duckduckgo"):
                     url = r.get('href', '')
                     if url and url not in seen_urls:
                         seen_urls.add(url)
@@ -1253,7 +1253,7 @@ def dork_search(batch_dork_queries):
         try:
             proxy = get_next_proxy()
             with DDGS(proxy=proxy) as ddgs:
-                results = list(ddgs.text(query, max_results=30, region=region))
+                results = list(ddgs.text(query, max_results=30, region=region, backend="duckduckgo"))
             for r in results:
                 url = r.get('href', '')
                 snippet = r.get('body', '') + ' ' + r.get('title', '')
