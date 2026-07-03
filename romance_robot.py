@@ -40,8 +40,28 @@ DROP_L1           = 0.30  # 30% drop → expand keyword pool
 DROP_L2           = 0.50  # 50% drop → add new platforms to dork
 DROP_L3           = 0.70  # 70% drop → purge stale cache + max dork volume
 
-# 4 DDG regions — full geographic coverage
+# 4 DDG regions — kept for region-mapping logic in dork engine
 DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en']
+
+# SearXNG public instances — open-source federated meta-search
+# GitHub Actions calls SearXNG (not DDG directly) → "no bare GitHub IP on DDG" rule preserved
+# SearXNG aggregates Google + Bing + DDG from its own IPs → no proxy needed for search
+SEARXNG_INSTANCES = [
+    'https://search.mdosch.de',
+    'https://searx.be',
+    'https://search.disroot.org',
+    'https://searxng.world',
+    'https://search.sapti.me',
+    'https://searx.tiekoetter.com',
+    'https://sx.ca0.bar',
+    'https://search.projectsegfau.lt',
+    'https://opnxng.com',
+    'https://search.ononoki.org',
+    'https://paulgo.io',
+    'https://searx.namejeff.com',
+    'https://northboot.xyz',
+    'https://searx.lunar.icu',
+]
 
 # Daily rotating search modifier — different DDG results each day of week
 DAILY_MODIFIERS = [
@@ -342,8 +362,9 @@ def print_startup_diagnostics():
         masked = parts[0].split(':')[0] + ':****@' + parts[1] if len(parts) == 2 else p[:20]
         print("  PROXY_LIST      : YES - " + str(len(PROXY_LIST)) + " proxies (" + masked + ")")
     else:
-        print("  PROXY_LIST      : NO - DDG will block GitHub IP. Set secret.")
-    print("  DDG regions     : " + str(DDG_REGIONS))
+        print("  PROXY_LIST      : NO - page scraping uses direct connection (search via SearXNG, unaffected)")
+    print("  Search engine   : SearXNG (" + str(len(SEARXNG_INSTANCES)) + " public instances, no proxy needed)")
+    print("  DDG regions     : " + str(DDG_REGIONS) + " (region-map logic only)")
     print("  Daily modifier  : " + get_daily_modifier())
     print("  Batch           : " + str(BATCH))
     print("  URL TTL         : " + str(URL_TTL_DAYS) + " days")
@@ -841,51 +862,67 @@ def get_daily_keywords():
 # SEARCH (multi-region + modifier + blogs)
 # ============================================
 
+def searxng_search(query, max_results=10):
+    """
+    Query public SearXNG instances — returns (urls, snippet_emails).
+    No proxy needed: SearXNG is itself a federated search proxy.
+    GitHub IP calls SearXNG → SearXNG queries Google/Bing/DDG from its own IP.
+    Falls back across instances until one responds with results.
+    """
+    headers = {
+        'User-Agent': get_random_user_agent(),
+        'Accept': 'application/json',
+    }
+    instances = SEARXNG_INSTANCES[:]
+    random.shuffle(instances)
+
+    for inst in instances:
+        try:
+            r = requests.get(
+                inst + '/search',
+                params={'q': query, 'format': 'json', 'language': 'en-US',
+                        'engines': 'google,bing,duckduckgo,brave'},
+                headers=headers,
+                timeout=8,
+                verify=False,
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            results = data.get('results', [])
+            if not results:
+                continue  # try next instance
+            urls = []
+            snippet_emails = []
+            seen_u = set()
+            for res in results[:max_results]:
+                url = res.get('url', '')
+                if url and url not in seen_u:
+                    seen_u.add(url)
+                    urls.append(url)
+                snippet = res.get('content', '') + ' ' + res.get('title', '')
+                for e in find_emails(snippet):
+                    snippet_emails.append(e)
+            return urls, snippet_emails
+        except Exception:
+            continue  # try next instance
+
+    return [], []  # all instances failed
+
+
 def ddg_search(query, region, num_results, retry):
     """
     Returns (urls, snippet_emails).
-    snippet_emails: emails extracted directly from DDG result snippets — no page visit needed.
-    urls: page URLs for follow-up visits when snippet has no email.
+    Now uses SearXNG public instances — no proxy needed, no DDG rate-limit risk.
+    'region' param kept for interface compatibility but SearXNG uses language=en-US globally.
     """
-    results = []
-    snippet_emails = []
-    seen_urls = set()
-    seen_emails = set()
-    attempt = 0
-    while attempt < retry:
-        try:
-            proxy = get_next_proxy()
-            with DDGS(proxy=proxy, verify=False) as ddgs:
-                for r in ddgs.text(query, max_results=num_results, region=region, backend="duckduckgo"):
-                    url = r.get('href', '')
-                    if url and url not in seen_urls:
-                        seen_urls.add(url)
-                        results.append(url)
-                    # Extract emails directly from snippet — free hits, no page visit needed
-                    snippet = r.get('body', '') + ' ' + r.get('title', '')
-                    for e in find_emails(snippet):
-                        if e not in seen_emails:
-                            seen_emails.add(e)
-                            snippet_emails.append(e)
-                            print("  SNIPPET HIT: " + e)
-            break
-        except Exception as e:
-            attempt += 1
-            err_str = str(e)[:80]
-            print("  DDG error (" + region + ", attempt " + str(attempt) + "): " + err_str)
-            # Only evict if proxy connectivity is dead — DDG rate limits / CAPTCHA keep proxy alive
-            _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'RemoteDisconnected',
-                                   'Connection refused', 'Cannot connect', '407',
-                                   'Tunnel connection failed', 'CONNECT tunnel')
-            if any(x in err_str for x in _PROXY_CONN_ERRORS):
-                _evict_proxy(proxy)
-            time.sleep(random.uniform(2, 4))
-    return results, snippet_emails
+    urls, snippet_emails = searxng_search(query, max_results=num_results)
+    for e in snippet_emails:
+        print("  SNIPPET HIT: " + e)
+    return urls, snippet_emails
 
 def search_google(keyword, num_results=10, retry=3):
-    # HARD BLOCK: no proxy at startup OR pool depleted mid-run → never hit DDG bare
-    if SKIP_DDG_NO_PROXY or PROXY_DEPLETED:
-        return [], []
+    # SearXNG handles search — no proxy needed (SearXNG proxies the engine calls)
     print("  Searching: " + keyword)
     all_results = []
     all_snippet_emails = []
@@ -1273,11 +1310,8 @@ def dork_search(batch_dork_queries):
     Extracts emails from snippets directly — no page visit needed.
     Falls back to visiting the page only when snippet has no email.
     """
-    # HARD BLOCK: no proxy at startup OR pool depleted mid-run → never hit DDG bare
-    if SKIP_DDG_NO_PROXY or PROXY_DEPLETED:
-        print("  Dork engine SKIPPED — proxy pool empty (GitHub IP protected)")
-        return [], []
-    print("\n--- Email Dork Engine running ---")
+    # SearXNG handles search — no proxy needed, GitHub IP never touches DDG directly
+    print("\n--- Email Dork Engine running (SearXNG) ---")
     print("  Dork queries this batch: " + str(len(batch_dork_queries)))
 
     direct_emails = []
@@ -1319,36 +1353,28 @@ def dork_search(batch_dork_queries):
     }
 
     def run_dork_query(query, region):
-        """Run one dork query, extract emails from snippets, return (emails, urls)."""
+        """Run one dork query via SearXNG, extract emails from snippets, return (emails, urls)."""
         emails_found = []
         urls_found = []
         try:
-            proxy = get_next_proxy()
-            with DDGS(proxy=proxy, verify=False) as ddgs:
-                results = list(ddgs.text(query, max_results=30, region=region, backend="duckduckgo"))
-            for r in results:
-                url = r.get('href', '')
-                snippet = r.get('body', '') + ' ' + r.get('title', '')
-                for e in find_emails(snippet):
-                    if e not in seen_emails:
-                        seen_emails.add(e)
-                        emails_found.append(e)
-                        print("  DORK HIT: " + e + " (from snippet, " + region + ")")
-                if url and url not in seen_urls and is_reader_website(url) and not find_emails(snippet):
-                    if len(urls_found) < 5:  # max 5 fallback URLs per dork query
+            urls, snip_emails = searxng_search(query, max_results=30)
+            for e in snip_emails:
+                if e not in seen_emails:
+                    seen_emails.add(e)
+                    emails_found.append(e)
+                    print("  DORK HIT: " + e + " (" + region + ")")
+            for url in urls:
+                if url and url not in seen_urls and is_reader_website(url) and not snip_emails:
+                    if len(urls_found) < 5:
                         seen_urls.add(url)
                         urls_found.append(url)
-            time.sleep(random.uniform(1, 2))
+            if not urls and not snip_emails:
+                print("  Dork error (" + region + "): No results found.")
+            time.sleep(random.uniform(0.5, 1))
         except Exception as e:
             err = str(e)[:80]
             print("  Dork error (" + region + "): " + err)
-            # Only evict on proxy connectivity death — DDG rate limits keep proxy alive for other calls
-            _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'RemoteDisconnected',
-                                   'Connection refused', 'Cannot connect', '407',
-                                   'Tunnel connection failed', 'CONNECT tunnel')
-            if any(x in err for x in _PROXY_CONN_ERRORS):
-                _evict_proxy(proxy)
-            time.sleep(random.uniform(2, 3))
+            time.sleep(random.uniform(1, 2))
         return emails_found, urls_found
 
     for idx, query in enumerate(batch_dork_queries):
@@ -1401,7 +1427,10 @@ def scrape_blog_directories(directories=None):
         try:
             proxy = get_next_proxy()
             proxies = {"http": proxy, "https": proxy} if proxy else None
-            response = requests.get(directory_url, headers=headers, proxies=proxies, timeout=6, verify=False)
+            try:
+                response = requests.get(directory_url, headers=headers, proxies=proxies, timeout=6, verify=False)
+            except Exception:
+                response = requests.get(directory_url, headers=headers, timeout=6, verify=False)
             soup = BeautifulSoup(response.text, 'html.parser')
 
             for tag in soup.find_all('a', href=True):
@@ -2126,7 +2155,7 @@ def daily_scrape():
         if len(urls) == 0 and len(snippet_emails) == 0:
             consecutive_failures += 1
             if consecutive_failures >= 15:
-                print("  PROXY DEAD: 15 consecutive 0-result keywords — skipping remaining keywords")
+                print("  SEARCH DEAD: 15 consecutive 0-result keywords — SearXNG may be down, skipping remaining keywords")
                 break
         else:
             consecutive_failures = 0
