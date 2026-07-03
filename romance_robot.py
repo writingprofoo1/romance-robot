@@ -32,7 +32,7 @@ VISITED_URLS_FILE = "visited_urls.json"
 MASTER_EMAILS_FILE = "master_emails.txt"
 YIELD_TRACKER_FILE = "yield_tracker.json"
 URL_TTL_DAYS      = 7    # revisit URLs after 7 days (weekly cycle = sustainable yield)
-KEYWORDS_PER_DAY  = 750  # Raised 500→750: SearXNG is faster than DDG, 82-min budget now fits more keywords
+KEYWORDS_PER_DAY  = 750  # 125 keywords/batch × 6 batches; Bing primary search fits 82-min budget
 
 # Adaptive engine thresholds
 TARGET_DAILY      = 750   # emails/day target
@@ -899,7 +899,7 @@ def _ddgs_lite_search(query, max_results=10):
     try:
         with ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(_run)
-            results = future.result(timeout=10)  # 10s hard limit — never hangs
+            results = future.result(timeout=20)  # 20s — free proxies are slow; was 10s
         urls = []
         snippet_emails = []
         for r in results:
@@ -915,6 +915,51 @@ def _ddgs_lite_search(query, max_results=10):
                                'Tunnel connection failed', 'RemoteDisconnected')
         if any(x in err for x in _PROXY_CONN_ERRORS):
             _evict_proxy(proxy)
+        return [], []
+
+
+def _bing_search(query, max_results=10):
+    """
+    Bing HTML scraper — middle fallback between SearXNG and DDGS Lite.
+    Bing (Microsoft) is hosted on Azure — GitHub Actions Azure IPs are NOT blocked.
+    Proxy attempted first; direct connection used if proxy fails (Azure→Azure = clean).
+    """
+    headers = {
+        'User-Agent': get_random_user_agent(),
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    params = {'q': query, 'count': min(max_results, 50), 'setmkt': 'en-US', 'setlang': 'en'}
+
+    def _parse_bing(html):
+        soup = BeautifulSoup(html, 'html.parser')
+        urls = []
+        snippet_emails = []
+        for li in soup.select('li.b_algo'):
+            a = li.select_one('h2 a')
+            if a and a.get('href', '').startswith('http'):
+                urls.append(a['href'])
+            snippet_emails.extend(find_emails(li.get_text(' ', strip=True)))
+        return urls[:max_results], snippet_emails
+
+    # Try with proxy first
+    proxy = get_next_proxy()
+    if proxy:
+        try:
+            r = requests.get('https://www.bing.com/search', params=params, headers=headers,
+                             proxies={'http': proxy, 'https': proxy}, timeout=8, verify=False)
+            urls, emails = _parse_bing(r.text)
+            if urls or emails:
+                return urls, emails
+        except Exception:
+            pass
+
+    # Direct connection — Azure→Azure, Bing does not block GitHub Actions IPs
+    try:
+        r = requests.get('https://www.bing.com/search', params=params, headers=headers,
+                         timeout=8, verify=False)
+        return _parse_bing(r.text)
+    except Exception:
         return [], []
 
 
@@ -955,56 +1000,86 @@ def searxng_search(query, max_results=10):
         except Exception:
             continue  # instance unreachable — try next
 
-    # All 3 instances failed — fall back to DDG Lite via proxy
+    # All 3 instances failed — try Bing HTML (Azure-native, won't block GitHub IPs)
+    result = _bing_search(query, max_results)
+    if result[0] or result[1]:
+        return result
+    # Bing also failed — last resort: DDG Lite via proxy
     return _ddgs_lite_search(query, max_results)
 
 
 def ddg_search(query, region, num_results, retry):
     """
-    Returns (urls, snippet_emails).
-    Now uses SearXNG — no proxy needed, no DDG rate-limit risk.
-    max_results bumped to 20 (SearXNG supports up to 50); num_results param preserved for interface compat.
+    Restored to direct DDGS call — what was working before SearXNG changes.
+    backend='html' is the most reliable for proxy IPs.
+    Wrapped in 20s ThreadPoolExecutor so a hung call never blocks the engine.
     """
-    urls, snippet_emails = searxng_search(query, max_results=max(20, num_results))
-    for e in snippet_emails:
-        print("  SNIPPET HIT: " + e)
-    return urls, snippet_emails
+    if not PROXY_LIST:
+        return [], []
+    proxy = get_next_proxy()
+    if not proxy:
+        return [], []
+    def _run():
+        with DDGS(proxy=proxy, verify=False) as d:
+            return list(d.text(query, region=region, max_results=max(20, num_results), backend="html"))
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            results = ex.submit(_run).result(timeout=20)
+        urls = [r.get('href', '') for r in results if r.get('href', '')]
+        snippet_emails = []
+        for r in results:
+            snippet_emails.extend(find_emails(r.get('body', '') + ' ' + r.get('title', '')))
+        if snippet_emails:
+            for e in snippet_emails:
+                print("  SNIPPET HIT: " + e)
+        return urls, snippet_emails
+    except Exception as e:
+        err = str(e)[:60]
+        _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'Cannot connect', '407',
+                               'Tunnel connection failed', 'RemoteDisconnected')
+        if any(x in err for x in _PROXY_CONN_ERRORS):
+            _evict_proxy(proxy)
+        return [], []
+
 
 def search_google(keyword, num_results=10, retry=3):
-    # SearXNG handles search — region-agnostic, 1 call per query is sufficient
+    """
+    Two-query search per keyword.
+    Path: Bing (Azure->Azure, direct, no proxy needed) → DDG HTML via proxy.
+    """
     print("  Searching: " + keyword)
     all_results = []
     all_snippet_emails = []
     seen = set()
     seen_emails = set()
 
-    # Call 1: general keyword search
-    urls, snip_emails = ddg_search(keyword, 'us-en', num_results, retry)
-    for url in urls:
-        if url not in seen:
-            seen.add(url)
-            all_results.append(url)
-    for e in snip_emails:
-        if e not in seen_emails:
-            seen_emails.add(e)
-            all_snippet_emails.append(e)
-    time.sleep(random.uniform(0.5, 1))
+    def _merge(urls, emails):
+        for url in urls:
+            if url not in seen:
+                seen.add(url)
+                all_results.append(url)
+        for e in emails:
+            if e not in seen_emails:
+                seen_emails.add(e)
+                all_snippet_emails.append(e)
 
-    # Call 2: blog-specific search — personal reader blogs (different query = different results)
+    # Call 1: general keyword — Bing first (Azure→Azure clean path), DDG fallback
+    urls, snip = _bing_search(keyword, num_results)
+    if not urls and not snip:
+        urls, snip = ddg_search(keyword, 'us-en', num_results, retry)
+    _merge(urls, snip)
+    time.sleep(random.uniform(0.3, 0.5))
+
+    # Call 2: blog-specific — targets personal reader blogs
     blog_query = keyword + ' readers site:blogspot.com OR site:wordpress.com'
-    urls, snip_emails = ddg_search(blog_query, 'us-en', num_results, retry)
-    for url in urls:
-        if url not in seen:
-            seen.add(url)
-            all_results.append(url)
-    for e in snip_emails:
-        if e not in seen_emails:
-            seen_emails.add(e)
-            all_snippet_emails.append(e)
-    time.sleep(random.uniform(0.5, 1))
+    urls, snip = _bing_search(blog_query, num_results)
+    if not urls and not snip:
+        urls, snip = ddg_search(blog_query, 'us-en', num_results, retry)
+    _merge(urls, snip)
+    time.sleep(random.uniform(0.3, 0.5))
 
     if len(all_results) == 0 and len(all_snippet_emails) == 0:
-        print("  WARNING: 0 results — SearXNG returned nothing for this keyword")
+        print("  WARNING: 0 results for this keyword")
     else:
         print("  Found " + str(len(all_results)) + " URLs, " + str(len(all_snippet_emails)) + " snippet emails")
     return all_results, all_snippet_emails
@@ -1359,7 +1434,7 @@ def dork_search(batch_dork_queries):
     Falls back to visiting the page only when snippet has no email.
     """
     # SearXNG handles search — routed via proxy, GitHub IP never touches DDG directly
-    print("\n--- Email Dork Engine running (SearXNG + DDGS Lite fallback) ---")
+    print("\n--- Email Dork Engine running (DDG via proxy + Bing fallback) ---")
     print("  Dork queries this batch: " + str(len(batch_dork_queries)))
     # Hard cap: dork engine may never consume more than 10 min of the 82-min budget
     # Keywords are the main email source — dork must not starve them
@@ -1396,19 +1471,16 @@ def dork_search(batch_dork_queries):
         _dork_ridx[0] += 1
         return r
 
-    # Secondary regions: cross-region sweep doubles snippet coverage
-    SECONDARY_REGION = {
-        'us-en': 'uk-en', 'uk-en': 'us-en', 'au-en': 'us-en',
-        'ca-en': 'us-en', 'ie-en': 'uk-en', 'nz-en': 'au-en',
-        'wt-wt': 'us-en',
-    }
-
     def run_dork_query(query, region):
-        """Run one dork query via SearXNG, extract emails from snippets, return (emails, urls)."""
+        """Run one dork query via DDG (region-aware) with Bing fallback — restored to original working path."""
         emails_found = []
         urls_found = []
         try:
-            urls, snip_emails = searxng_search(query, max_results=30)
+            # Primary: DDG via proxy with region — original path that produced DORK HITs
+            urls, snip_emails = ddg_search(query, region, 30, 1)
+            # Fallback: Bing direct if DDG returned nothing
+            if not urls and not snip_emails:
+                urls, snip_emails = _bing_search(query, max_results=30)
             for e in snip_emails:
                 if e not in seen_emails:
                     seen_emails.add(e)
@@ -2030,7 +2102,7 @@ def daily_scrape():
 
     # --- Sleep config ---
     INTER_URL_SLEEP = (0.5, 1.0) if IS_GITHUB_ACTIONS else (3, 6)
-    KEYWORD_SLEEP   = (0.3, 0.5) if IS_GITHUB_ACTIONS else (12, 18)  # SearXNG needs no rate-limit delay
+    KEYWORD_SLEEP   = (0.3, 0.5) if IS_GITHUB_ACTIONS else (12, 18)
     COOLDOWN_SLEEP  = (40, 60)
 
     all_emails = []
@@ -2203,9 +2275,9 @@ def daily_scrape():
         total_websites += len(urls)
         if len(urls) == 0 and len(snippet_emails) == 0:
             consecutive_failures += 1
-            if consecutive_failures >= 15:
-                print("  SEARCH DEAD: 15 consecutive 0-result keywords — SearXNG may be down, skipping remaining keywords")
-                break
+            if consecutive_failures == 15:
+                print("  WARNING: 15 consecutive 0-result keywords — search unreliable, continuing anyway")
+            # No break — keep trying remaining keywords (Bing direct should recover)
         else:
             consecutive_failures = 0
 
