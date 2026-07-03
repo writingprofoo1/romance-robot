@@ -862,52 +862,96 @@ def get_daily_keywords():
 # SEARCH (multi-region + modifier + blogs)
 # ============================================
 
+def _parse_searxng_response(r, max_results):
+    """Extract (urls, snippet_emails) from a SearXNG JSON response object."""
+    data = r.json()
+    results = data.get('results', [])
+    if not results:
+        return None  # signal: empty, try next instance
+    urls = []
+    snippet_emails = []
+    seen_u = set()
+    for res in results[:max_results]:
+        url = res.get('url', '')
+        if url and url not in seen_u:
+            seen_u.add(url)
+            urls.append(url)
+        snippet = res.get('content', '') + ' ' + res.get('title', '')
+        for e in find_emails(snippet):
+            snippet_emails.append(e)
+    return urls, snippet_emails
+
+
+def _ddgs_lite_search(query, max_results=10):
+    """
+    DDG Lite endpoint via proxy — hard fallback when all SearXNG instances fail.
+    backend='lite' hits lite.duckduckgo.com which is less rate-limited than html endpoint.
+    """
+    if not PROXY_LIST:
+        return [], []
+    proxy = get_next_proxy()
+    if not proxy:
+        return [], []
+    try:
+        with DDGS(proxy=proxy, verify=False) as ddgs_client:
+            results = list(ddgs_client.text(query, max_results=max_results, backend="lite"))
+        urls = []
+        snippet_emails = []
+        for r in results:
+            url = r.get('href', '')
+            if url:
+                urls.append(url)
+            snippet = r.get('body', '') + ' ' + r.get('title', '')
+            snippet_emails.extend(find_emails(snippet))
+        return urls, snippet_emails
+    except Exception as e:
+        err = str(e)[:60]
+        _PROXY_CONN_ERRORS = ('ProxyError', 'ConnectionError', 'Cannot connect', '407',
+                               'Tunnel connection failed', 'RemoteDisconnected')
+        if any(x in err for x in _PROXY_CONN_ERRORS):
+            _evict_proxy(proxy)
+        return [], []
+
+
 def searxng_search(query, max_results=10):
     """
-    Query public SearXNG instances — returns (urls, snippet_emails).
-    No proxy needed: SearXNG is itself a federated search proxy.
-    GitHub IP calls SearXNG → SearXNG queries Google/Bing/DDG from its own IP.
-    Falls back across instances until one responds with results.
+    Primary search: SearXNG public instances routed via free proxy.
+    GitHub Azure IP → proxy → SearXNG → Google/Bing/DDG.
+    Proxy masks Azure IP so SearXNG instances don't block us.
+    Falls back to direct connection if proxy fails to reach SearXNG.
+    Falls back to DDGS lite (DDG Lite endpoint) if all SearXNG instances fail.
     """
     headers = {
         'User-Agent': get_random_user_agent(),
         'Accept': 'application/json',
     }
+    params = {'q': query, 'format': 'json', 'language': 'en-US'}
     instances = SEARXNG_INSTANCES[:]
     random.shuffle(instances)
 
     for inst in instances:
+        proxy = get_next_proxy()
+        proxies = {'http': proxy, 'https': proxy} if proxy else None
         try:
-            r = requests.get(
-                inst + '/search',
-                params={'q': query, 'format': 'json', 'language': 'en-US'},
-                headers=headers,
-                timeout=8,
-                verify=False,
-            )
+            # Attempt 1: via proxy (hides Azure IP from SearXNG)
+            try:
+                r = requests.get(inst + '/search', params=params, headers=headers,
+                                 proxies=proxies, timeout=8, verify=False)
+            except Exception:
+                # Proxy failed to reach SearXNG → try direct
+                r = requests.get(inst + '/search', params=params, headers=headers,
+                                 timeout=8, verify=False)
             if r.status_code != 200:
                 continue
-            data = r.json()
-            results = data.get('results', [])
-            if not results:
-                continue  # try next instance
-            urls = []
-            snippet_emails = []
-            seen_u = set()
-            for res in results[:max_results]:
-                url = res.get('url', '')
-                if url and url not in seen_u:
-                    seen_u.add(url)
-                    urls.append(url)
-                snippet = res.get('content', '') + ' ' + res.get('title', '')
-                for e in find_emails(snippet):
-                    snippet_emails.append(e)
-            return urls, snippet_emails
+            parsed = _parse_searxng_response(r, max_results)
+            if parsed is None:
+                continue  # empty results — try next instance
+            return parsed
         except Exception:
-            continue  # try next instance
+            continue  # instance unreachable — try next
 
-    print("  SearXNG: all instances failed for query")
-    return [], []  # all instances failed
+    # All SearXNG instances failed — fall back to DDG Lite via proxy
+    return _ddgs_lite_search(query, max_results)
 
 
 def ddg_search(query, region, num_results, retry):
