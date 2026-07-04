@@ -775,7 +775,15 @@ KW_ACTIVITIES = [
     'reading buddies', 'book pen pals', 'reading challenge members',
     'book haul community', 'TBR community', 'romance book fans',
     'romance enthusiasts', 'romance addicts', 'romance obsessed',
+    # Female-dominated professions — prime romance reader demographics
     'nurses who read', 'teachers who read', 'moms who read',
+    'social workers who read', 'librarians who read',
+    'flight attendants who read', 'dental hygienists who read',
+    'HR professionals who read', 'administrative assistants who read',
+    'executive assistants who read', 'childcare workers who read',
+    'physical therapists who read', 'occupational therapists who read',
+    'pharmacists who read', 'midwives who read', 'doulas who read',
+    'school counselors who read', 'speech therapists who read',
     'working women who read', 'college students who read',
     'binge readers', 'one sitting readers', 'speed readers',
     'slow readers', 'weekend readers', 'late night readers',
@@ -937,8 +945,18 @@ def _bing_search(query, max_results=10):
         snippet_emails = []
         for li in soup.select('li.b_algo'):
             a = li.select_one('h2 a')
-            if a and a.get('href', '').startswith('http'):
-                urls.append(a['href'])
+            href = a.get('href', '') if a else ''
+            # Bing often returns bing.com/ck/ tracking redirects — use cite tag instead
+            if 'bing.com' in href or not href.startswith('http'):
+                cite = li.select_one('cite')
+                if cite:
+                    raw = cite.get_text(' ', strip=True).split(' ')[0].strip()
+                    if raw and '.' in raw:
+                        href = 'https://' + raw.lstrip('/')
+                    else:
+                        href = ''
+            if href and href.startswith('http') and 'bing.com' not in href:
+                urls.append(href)
             snippet_emails.extend(find_emails(li.get_text(' ', strip=True)))
         return urls[:max_results], snippet_emails
 
@@ -1416,8 +1434,48 @@ def generate_dork_queries():
         '"gmail.com" "romance book club" Zambia',
     ]
 
+    # TIER 10: Female-dominated professional communities — nurses, teachers, social workers etc.
+    # These professions are 75-97% female + high stress = prime romance reader demographic
+    tier10 = [
+        # Nursing — allnurses.com is indexed and has public email-visible posts
+        '"gmail.com" site:allnurses.com "romance" OR "books"',
+        '"@gmail.com" site:allnurses.com "reading" OR "book club"',
+        '"gmail.com" "nurse" "romance reader" "contact"',
+        '"gmail.com" "nurse" "romance books" "email me"',
+        '"yahoo.com" "nurse" "romance reader"',
+        # Teachers
+        '"gmail.com" "teacher" "romance reader" "contact"',
+        '"@gmail.com" site:teachers.net "romance" OR "books"',
+        '"gmail.com" "teacher" "romance books" "email"',
+        '"gmail.com" "educator" "romance reader"',
+        # Social workers
+        '"gmail.com" "social worker" "romance books"',
+        '"gmail.com" "social work" "romance reader" "contact"',
+        # Flight attendants
+        '"gmail.com" "flight attendant" "romance reader"',
+        '"gmail.com" "cabin crew" "romance books"',
+        # Librarians
+        '"gmail.com" site:librarything.com "romance" "librarian"',
+        '"gmail.com" "librarian" "romance reader" "contact"',
+        # HR / Admin / EA
+        '"gmail.com" "HR professional" "romance reader"',
+        '"gmail.com" "executive assistant" "romance books"',
+        # Physical / occupational therapists
+        '"gmail.com" "physical therapist" "romance reader"',
+        '"gmail.com" "occupational therapist" "romance books"',
+        # Dental hygienists
+        '"gmail.com" "dental hygienist" "romance reader"',
+        # Midwives / doulas
+        '"gmail.com" "midwife" "romance books"',
+        '"gmail.com" "doula" "romance reader"',
+        # General shift-worker female angles
+        '"gmail.com" "night shift" "romance reader" "nurse" OR "healthcare"',
+        '"gmail.com" "healthcare worker" "romance books" "contact"',
+        '"gmail.com" "women in healthcare" "romance reader"',
+    ]
+
     # Ordered dedup: tier1 first = highest yield always runs in earliest batch
-    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7 + tier8 + tier9
+    ordered = tier1 + tier2 + tier3 + tier4 + tier5 + tier6 + tier7 + tier8 + tier9 + tier10
     seen = set()
     deduped = []
     for q in ordered:
@@ -1862,6 +1920,51 @@ ARC_READER_PLATFORMS = [
 ]
 
 
+# Female-dominated professional communities — highest romance reader overlap
+# These professions are 75-97% female + high stress + shift work = prime romance reader demographic
+SHIFT_WORKER_FORUMS = [
+    # Nursing (~90% female, shift work, highest romance reader overlap)
+    'https://allnurses.com/general-nursing-discussion/',
+    'https://allnurses.com/nurse-life/',
+    'https://allnurses.com/off-topic-lounge/',
+    'https://www.nursezone.com/nursing-news-events/more-features/',
+    'https://nurse.com/blog/',
+    'https://scrubsmag.com/life/',
+    'https://www.travelnursing.com/news/',
+    # Teachers (~75% female, summer reading + grading stress escapism)
+    'https://teachers.net/gazette/',
+    'https://www.weareteachers.com/teacher-self-care/',
+    'https://www.teacherspayteachers.com/Browse/PreK-12-Subject-Area/For-All-Subject-Areas',
+    'https://www.edweek.org/teaching-learning/',
+    # Social workers (~80% female, highest burnout = heaviest escapism readers)
+    'https://www.socialworktoday.com/archive.shtml',
+    'https://www.socialworker.com/feature-articles/',
+    'https://www.naswnews.org/',
+    # Flight attendants (~75% female, layovers = dedicated reading time)
+    'https://theflightattendantlife.com/',
+    'https://www.cabincrewinternational.com/',
+    'https://ifatca.org/news/',
+    # Librarians (~80% female, already readers by profession)
+    'https://americanlibraries.magazine.org/',
+    'https://www.librarything.com/groups/librarians',
+    'https://bookriot.com/category/read-harder/',
+    # Dental hygienists (~97% female, long chair-side downtime)
+    'https://www.rdhmag.com/patient-care/',
+    'https://www.dimensionsofdentalshygiene.com/blogs/',
+    # Administrative professionals & EAs (~90% female)
+    'https://www.iaap-hq.org/page/APSBlog',
+    'https://executivesecretarymagazine.com/blog/',
+    # HR professionals (~75% female)
+    'https://www.shrm.org/topics-tools/news/all-things-work',
+    'https://hrbartender.com/',
+    # Childcare & early education (~95% female)
+    'https://www.naeyc.org/resources/blog',
+    'https://www.childcareexchange.com/articles/',
+    # Physical & occupational therapists (~70% female, shift stress)
+    'https://www.apta.org/your-practice/practice-models-and-settings',
+    'https://otpotential.com/blog',
+]
+
 def scrape_reddit_json(batch_searches):
     """
     Scrapes Reddit romance subreddits via public JSON API.
@@ -2227,7 +2330,7 @@ def daily_scrape():
         print("  Goodreads+LT total: " + str(len(community_emails)) + " emails")
     _t_community_elapsed = int(time.time() - _t_community_start)
 
-    # --- Source 6: Romance Forums + ARC Reader Platforms ---
+    # --- Source 6: Romance Forums + ARC Reader Platforms + Shift-Worker Communities ---
     _t_forum_start = time.time()
     if not _out_of_time():
         if IS_GITHUB_ACTIONS and BATCH > 0:
@@ -2239,18 +2342,27 @@ def daily_scrape():
             a_start    = (BATCH - 1) * arc_size
             a_end      = a_start + arc_size if BATCH < 6 else len(ARC_READER_PLATFORMS)
             batch_arc  = ARC_READER_PLATFORMS[a_start:a_end]
+            sw_size    = max(1, len(SHIFT_WORKER_FORUMS) // 6)
+            sw_start   = (BATCH - 1) * sw_size
+            sw_end     = sw_start + sw_size if BATCH < 6 else len(SHIFT_WORKER_FORUMS)
+            batch_sw   = SHIFT_WORKER_FORUMS[sw_start:sw_end]
         else:
             batch_forums = ROMANCE_FORUM_PAGES
             batch_arc    = ARC_READER_PLATFORMS
+            batch_sw     = SHIFT_WORKER_FORUMS
         forum_emails = clean_emails(scrape_forum_pages(batch_forums))
         all_emails.extend(forum_emails)
         arc_emails = []
         if not _out_of_time():
             arc_emails = clean_emails(scrape_arc_platforms(batch_arc))
             all_emails.extend(arc_emails)
-        if forum_emails or arc_emails:
+        sw_emails = []
+        if not _out_of_time():
+            sw_emails = clean_emails(scrape_forum_pages(batch_sw))
+            all_emails.extend(sw_emails)
+        if forum_emails or arc_emails or sw_emails:
             save_master_emails(all_emails)
-            print("  Forum+ARC checkpoint: " + str(len(forum_emails) + len(arc_emails)) + " emails saved")
+            print("  Forum+ARC+SW checkpoint: " + str(len(forum_emails) + len(arc_emails) + len(sw_emails)) + " emails saved")
     _t_forum_elapsed = int(time.time() - _t_forum_start)
 
     # --- Source 5 (keyword loop): DDG multi-region + modifier + blog searches (fills remaining time) ---
