@@ -363,7 +363,7 @@ def print_startup_diagnostics():
         print("  PROXY_LIST      : YES - " + str(len(PROXY_LIST)) + " proxies (" + masked + ")")
     else:
         print("  PROXY_LIST      : NO - page scraping uses direct connection (search via SearXNG, unaffected)")
-    print("  Search engine   : SearXNG (" + str(len(SEARXNG_INSTANCES)) + " instances, 3 tried/query via proxy) + DDGS Lite fallback")
+    print("  Search engine   : Bing primary (Azure→Azure, no proxy) + DDG HTML via proxy fallback")
     print("  DDG regions     : " + str(DDG_REGIONS) + " (region-map logic only)")
     print("  Daily modifier  : " + get_daily_modifier())
     print("  Batch           : " + str(BATCH))
@@ -952,7 +952,7 @@ def _bing_search(query, max_results=10):
                 if cite:
                     raw = cite.get_text(' ', strip=True).split(' ')[0].strip()
                     if raw and '.' in raw:
-                        href = 'https://' + raw.lstrip('/')
+                        href = raw if raw.startswith('http') else 'https://' + raw.lstrip('/')
                     else:
                         href = ''
             if href and href.startswith('http') and 'bing.com' not in href:
@@ -2212,6 +2212,7 @@ def daily_scrape():
     total_websites = 0
     skipped_ttl = 0
     skipped_blocked = 0
+    _initial_master_count = len(load_master_emails())  # snapshot before batch starts
 
     visited_urls = load_visited_urls()
     fresh_count = count_fresh_urls(visited_urls)
@@ -2453,7 +2454,8 @@ def daily_scrape():
 
     save_visited_urls(visited_urls)
     all_emails = clean_emails(all_emails)
-    new_email_count = save_master_emails(all_emails)
+    save_master_emails(all_emails)
+    new_email_count = len(load_master_emails()) - _initial_master_count  # true count across all checkpoint saves
     record_batch_yield(new_email_count)
 
     print("=" * 60)
