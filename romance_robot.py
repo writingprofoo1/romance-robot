@@ -43,25 +43,8 @@ DROP_L3           = 0.70  # 70% drop → purge stale cache + max dork volume
 # 4 DDG regions — kept for region-mapping logic in dork engine
 DDG_REGIONS = ['us-en', 'uk-en', 'au-en', 'ca-en']
 
-# SearXNG public instances — open-source federated meta-search
-# GitHub Actions calls SearXNG (not DDG directly) → "no bare GitHub IP on DDG" rule preserved
-# SearXNG aggregates Google + Bing + DDG from its own IPs → no proxy needed for search
-SEARXNG_INSTANCES = [
-    'https://search.mdosch.de',
-    'https://searx.be',
-    'https://search.disroot.org',
-    'https://searxng.world',
-    'https://search.sapti.me',
-    'https://searx.tiekoetter.com',
-    'https://sx.ca0.bar',
-    'https://search.projectsegfau.lt',
-    'https://opnxng.com',
-    'https://search.ononoki.org',
-    'https://paulgo.io',
-    'https://searx.namejeff.com',
-    'https://northboot.xyz',
-    'https://searx.lunar.icu',
-]
+# Search: Bing primary (Azure→Azure, no proxy) + DDG HTML via proxy fallback
+# SEARXNG_INSTANCES removed — searxng_search() was dead code, never called in pipeline
 
 # Daily rotating search modifier — different DDG results each day of week
 DAILY_MODIFIERS = [
@@ -362,7 +345,7 @@ def print_startup_diagnostics():
         masked = parts[0].split(':')[0] + ':****@' + parts[1] if len(parts) == 2 else p[:20]
         print("  PROXY_LIST      : YES - " + str(len(PROXY_LIST)) + " proxies (" + masked + ")")
     else:
-        print("  PROXY_LIST      : NO - page scraping uses direct connection (search via SearXNG, unaffected)")
+        print("  PROXY_LIST      : NO - page scraping uses direct connection (Bing search unaffected — Azure→Azure)")
     print("  Search engine   : Bing primary (Azure→Azure, no proxy) + DDG HTML via proxy fallback")
     print("  DDG regions     : " + str(DDG_REGIONS) + " (region-map logic only)")
     print("  Daily modifier  : " + get_daily_modifier())
@@ -870,29 +853,9 @@ def get_daily_keywords():
 # SEARCH (multi-region + modifier + blogs)
 # ============================================
 
-def _parse_searxng_response(r, max_results):
-    """Extract (urls, snippet_emails) from a SearXNG JSON response object."""
-    data = r.json()
-    results = data.get('results', [])
-    if not results:
-        return None  # signal: empty, try next instance
-    urls = []
-    snippet_emails = []
-    seen_u = set()
-    for res in results[:max_results]:
-        url = res.get('url', '')
-        if url and url not in seen_u:
-            seen_u.add(url)
-            urls.append(url)
-        snippet = res.get('content', '') + ' ' + res.get('title', '')
-        for e in find_emails(snippet):
-            snippet_emails.append(e)
-    return urls, snippet_emails
-
-
 def _ddgs_lite_search(query, max_results=10):
     """
-    DDG Lite endpoint via proxy — hard fallback when all SearXNG instances fail.
+    DDG Lite endpoint via proxy — hard fallback when Bing scrape fails.
     backend='lite' hits lite.duckduckgo.com — less rate-limited than html endpoint.
     Hard 10s timeout via ThreadPoolExecutor so a hung DDGS call can't block the engine.
     """
@@ -928,7 +891,7 @@ def _ddgs_lite_search(query, max_results=10):
 
 def _bing_search(query, max_results=10):
     """
-    Bing HTML scraper — middle fallback between SearXNG and DDGS Lite.
+    Bing HTML scraper — primary search engine, tried before DDGS Lite fallback.
     Bing (Microsoft) is hosted on Azure — GitHub Actions Azure IPs are NOT blocked.
     Proxy attempted first; direct connection used if proxy fails (Azure→Azure = clean).
     """
@@ -981,54 +944,10 @@ def _bing_search(query, max_results=10):
         return [], []
 
 
-def searxng_search(query, max_results=10):
-    """
-    Primary search: SearXNG public instances routed via free proxy.
-    GitHub Azure IP → proxy → SearXNG → Google/Bing/DDG.
-    Proxy masks Azure IP so SearXNG instances don't block us.
-    Falls back to direct connection if proxy fails to reach SearXNG.
-    Falls back to DDGS lite (DDG Lite endpoint) if all SearXNG instances fail.
-    """
-    headers = {
-        'User-Agent': get_random_user_agent(),
-        'Accept': 'application/json',
-    }
-    params = {'q': query, 'format': 'json', 'language': 'en-US'}
-    # Only try 3 random instances — trying all 14 burns 100+ seconds per failed query
-    instances = random.sample(SEARXNG_INSTANCES, min(3, len(SEARXNG_INSTANCES)))
-
-    for inst in instances:
-        proxy = get_next_proxy()
-        proxies = {'http': proxy, 'https': proxy} if proxy else None
-        try:
-            # Attempt 1: via proxy (hides Azure IP from SearXNG)
-            try:
-                r = requests.get(inst + '/search', params=params, headers=headers,
-                                 proxies=proxies, timeout=4, verify=False)
-            except Exception:
-                # Proxy failed → try direct (4s, not 8s)
-                r = requests.get(inst + '/search', params=params, headers=headers,
-                                 timeout=4, verify=False)
-            if r.status_code != 200:
-                continue
-            parsed = _parse_searxng_response(r, max_results)
-            if parsed is None:
-                continue  # empty results — try next instance
-            return parsed
-        except Exception:
-            continue  # instance unreachable — try next
-
-    # All 3 instances failed — try Bing HTML (Azure-native, won't block GitHub IPs)
-    result = _bing_search(query, max_results)
-    if result[0] or result[1]:
-        return result
-    # Bing also failed — last resort: DDG Lite via proxy
-    return _ddgs_lite_search(query, max_results)
-
 
 def ddg_search(query, region, num_results, retry):
     """
-    Restored to direct DDGS call — what was working before SearXNG changes.
+    Direct DDGS call — proxy-based fallback after Bing.
     backend='html' is the most reliable for proxy IPs.
     Wrapped in 20s ThreadPoolExecutor so a hung call never blocks the engine.
     """
@@ -1491,7 +1410,6 @@ def dork_search(batch_dork_queries):
     Extracts emails from snippets directly — no page visit needed.
     Falls back to visiting the page only when snippet has no email.
     """
-    # SearXNG handles search — routed via proxy, GitHub IP never touches DDG directly
     print("\n--- Email Dork Engine running (DDG via proxy + Bing fallback) ---")
     print("  Dork queries this batch: " + str(len(batch_dork_queries)))
     # Hard cap: dork engine may never consume more than 10 min of the 82-min budget
@@ -1563,7 +1481,7 @@ def dork_search(batch_dork_queries):
             print("  Dork engine capped at 10 min — " + str(idx + 1) + "/" + str(len(batch_dork_queries)) + " queries done — handing time to keywords")
             break
 
-        # Single call per query — SearXNG is region-agnostic, secondary call was duplicate
+        # Single call per query — region-mapped via pick_dork_region()
         primary = pick_dork_region(query)
         em, ur = run_dork_query(query, primary)
         direct_emails.extend(em)
