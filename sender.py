@@ -313,6 +313,12 @@ def send_email(relay, to_email, subject, body, dry_run=False):
         log.info(f"SENT [{relay['name']}] → {to_email} | {subject[:60]}")
         return True
 
+    except smtplib.SMTPAuthenticationError as e:
+        # 535 = bad credentials — relay config issue, NOT a recipient bounce
+        # Never write to bounced_emails.txt for auth failures
+        log.error(f"AUTH FAILURE [{relay['name']}] — check SMTP credentials (code={e.smtp_code}). Aborting.")
+        return "auth_error"
+
     except smtplib.SMTPRecipientsRefused as e:
         code = list(e.recipients.values())[0][0]
         if 500 <= code <= 599:
@@ -322,6 +328,10 @@ def send_email(relay, to_email, subject, body, dry_run=False):
         return False
 
     except smtplib.SMTPResponseException as e:
+        # 535 auth errors should be caught above — but guard here too
+        if e.smtp_code == 535:
+            log.error(f"AUTH FAILURE [{relay['name']}] code=535 — check credentials. Aborting.")
+            return "auth_error"
         if 500 <= e.smtp_code <= 599:
             log.warning(f"HARD BOUNCE [{relay['name']}] {to_email} code={e.smtp_code}")
             return "bounce"
@@ -376,13 +386,14 @@ def run(dry_run=False, limit=None):
     emails = [e for e in raw if EMAIL_RE.match(e)]
     log.info(f"Loaded {len(emails)} valid emails ({len(raw) - len(emails)} malformed skipped)")
 
-    sent_count   = 0
-    bounce_count = 0
-    skip_count   = 0
+    sent_count    = 0
+    bounce_count  = 0
+    skip_count    = 0
+    attempt_count = 0  # total non-skipped attempts (governs --limit)
 
     for email in emails:
-        # Hard limit override (--limit flag or dry-run cap)
-        if limit is not None and sent_count >= limit:
+        # Hard limit: count actual send attempts, not just successes
+        if limit is not None and attempt_count >= limit:
             log.info(f"--limit {limit} reached.")
             break
 
@@ -425,6 +436,7 @@ def run(dry_run=False, limit=None):
         active_relay = relay if relay else SMTP_RELAYS[0]
 
         # Send
+        attempt_count += 1
         result = send_email(
             active_relay,
             email,
@@ -432,6 +444,11 @@ def run(dry_run=False, limit=None):
             content_row["Content"],
             dry_run=dry_run,
         )
+
+        if result == "auth_error":
+            # Credentials wrong — abort entire run, don't blacklist recipients
+            log.error("Aborting run — fix SMTP credentials before retrying.")
+            break
 
         if result == "bounce":
             append_to_file(BOUNCED_FILE, email)
