@@ -7,6 +7,7 @@ All state persisted to CSV/JSON files auto-committed by workflow.
 """
 
 import os
+import re
 import csv
 import json
 import time
@@ -17,6 +18,9 @@ import logging
 from datetime import date, datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+# Strict email regex — rejects leading #/%/- and URL-encoded junk
+EMAIL_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._%+\-]*@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 
 # ============================================
 # CONFIG
@@ -368,11 +372,8 @@ def run(dry_run=False, limit=None):
     with open(EMAILS_FILE, "r") as f:
         raw = [line.strip().lower() for line in f if line.strip()]
 
-    # Basic validation: must contain @ and a dot after @
-    emails = [
-        e for e in raw
-        if "@" in e and "." in e.split("@", 1)[-1]
-    ]
+    # Strict validation — rejects #/% prefixes, URL-encoded junk, malformed domains
+    emails = [e for e in raw if EMAIL_RE.match(e)]
     log.info(f"Loaded {len(emails)} valid emails ({len(raw) - len(emails)} malformed skipped)")
 
     sent_count   = 0
@@ -449,8 +450,9 @@ def run(dry_run=False, limit=None):
             # Mark content used (in-memory — saved at end)
             mark_content_used(content, row_id)
             sent_count += 1
-            # Throttle between sends (avoids burst SMTP rate limiting)
-            time.sleep(random.uniform(1.5, 3.5))
+            # Throttle between sends — skip in dry-run
+            if not dry_run:
+                time.sleep(random.uniform(1.5, 3.5))
 
     log.info(
         f"=== Run complete: sent={sent_count} | bounces={bounce_count} | skipped={skip_count} ==="
