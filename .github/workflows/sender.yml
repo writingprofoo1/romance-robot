@@ -53,6 +53,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Touch optional files so git add never fails if they don't exist yet
+          touch unsubscribed_emails.txt bounced_emails.txt email_tracking.csv relay_state.json
           git add \
             email_tracking.csv \
             relay_state.json \
