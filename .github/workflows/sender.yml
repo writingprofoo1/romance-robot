@@ -1,0 +1,69 @@
+name: Romance Robot Sender
+
+on:
+  schedule:
+    # 6 runs/day — staggered 30 min after scraper (:00) to avoid git conflicts
+    # Times in UTC; WAT = UTC+1
+    - cron: "30 1 * * *"   # 02:30 WAT
+    - cron: "30 5 * * *"   # 06:30 WAT
+    - cron: "30 9 * * *"   # 10:30 WAT
+    - cron: "30 13 * * *"  # 14:30 WAT
+    - cron: "30 17 * * *"  # 18:30 WAT
+    - cron: "30 21 * * *"  # 22:30 WAT
+  workflow_dispatch:        # manual trigger for testing
+
+concurrency:
+  group: romance-sender-pipeline
+  cancel-in-progress: false  # never cancel a run mid-send
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for clean rebase on push
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip
+
+      - name: Pull latest state before run
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+
+      - name: Run sender
+        env:
+          BREVO_USER:    ${{ secrets.BREVO_USER }}
+          BREVO_PASS:    ${{ secrets.BREVO_PASS }}
+          MAILJET_USER:  ${{ secrets.MAILJET_USER }}
+          MAILJET_PASS:  ${{ secrets.MAILJET_PASS }}
+        run: python sender.py
+
+      - name: Commit and push state files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            email_tracking.csv \
+            relay_state.json \
+            content.csv \
+            bounced_emails.txt \
+            unsubscribed_emails.txt
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore: sender state update [skip ci]"
+          # Retry loop — handles race condition if scraper pushes at same moment
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin main && break
+            echo "Push attempt $i failed — retrying in 15s..."
+            sleep 15
+          done
