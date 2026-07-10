@@ -1,15 +1,16 @@
 name: Romance Robot Unsubscribe Monitor
 
 on:
-  workflow_dispatch:        # Phase 1 — manual trigger only for testing
-  # ── Phase 2 — uncomment after manual test passes ──────────────────────
-  # schedule:
-  #   - cron: "45 1 * * *"   # 02:45 WAT  (15 min after sender)
-  #   - cron: "45 5 * * *"   # 06:45 WAT
-  #   - cron: "45 9 * * *"   # 10:45 WAT
-  #   - cron: "45 13 * * *"  # 14:45 WAT
-  #   - cron: "45 17 * * *"  # 18:45 WAT
-  #   - cron: "45 21 * * *"  # 22:45 WAT
+  workflow_dispatch:        # manual trigger available at any time
+  schedule:
+    # 6 runs/day — 15 min after sender (:30) to avoid git conflicts
+    # Times in UTC; WAT = UTC+1
+    - cron: "45 1 * * *"   # 02:45 WAT
+    - cron: "45 5 * * *"   # 06:45 WAT
+    - cron: "45 9 * * *"   # 10:45 WAT
+    - cron: "45 13 * * *"  # 14:45 WAT
+    - cron: "45 17 * * *"  # 18:45 WAT
+    - cron: "45 21 * * *"  # 22:45 WAT
 
 concurrency:
   group: romance-unsub-pipeline
