@@ -12,7 +12,6 @@ Phase 2: cron added to .github/workflows/unsubscribe_monitor.yml after test pass
 import os
 import re
 import csv
-import ssl
 import imaplib
 import email
 import email.header
@@ -30,8 +29,8 @@ from email.mime.multipart import MIMEMultipart
 IMAP_HOST = "server353.web-hosting.com"
 IMAP_PORT = 993
 
-# ROMANCE_EMAIL defaults to the known address if secret not set
-IMAP_USER = os.environ.get("ROMANCE_EMAIL", "romancereads@lulllitcloud.com")
+# ROMANCE_EMAIL defaults to the known address if secret is missing OR empty string
+IMAP_USER = os.environ.get("ROMANCE_EMAIL") or "romancereads@lulllitcloud.com"
 IMAP_PASS = os.environ.get("ROMANCE_EMAIL_PASS", "")
 
 FROM_NAME  = "Romance Reads"
@@ -320,8 +319,8 @@ def run(dry_run: bool = False):
 
     # ── Connect to IMAP ──────────────────────────────────────────────────
     try:
-        ssl_ctx = ssl.create_default_context()
-        mail    = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, ssl_context=ssl_ctx)
+        mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+        log.info(f"Attempting IMAP login as: {IMAP_USER}")
         mail.login(IMAP_USER, IMAP_PASS)
         log.info(f"IMAP connected: {IMAP_USER} @ {IMAP_HOST}:{IMAP_PORT}")
     except Exception as e:
