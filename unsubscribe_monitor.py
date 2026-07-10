@@ -189,13 +189,43 @@ log = logging.getLogger("monitor")
 # CLASSIFICATION
 # ============================================
 
+def strip_quoted_text(body: str) -> str:
+    """
+    Remove quoted reply chains from an email body so we only classify
+    the fresh text the person actually typed.
+    Strips:
+      - Lines starting with '>' (standard quoting)
+      - Everything from 'On ... wrote:' onwards (Gmail/Outlook style)
+      - Everything from '-----Original Message-----' onwards
+    """
+    # Cut at common quote-header patterns
+    cut_patterns = [
+        r"\bOn .{10,100} wrote:\s*$",          # Gmail: "On Thu, Jul 10 ... wrote:"
+        r"-{3,}\s*Original Message\s*-{3,}",   # Outlook
+        r"_{3,}",                               # Outlook underscore divider
+        r"From:\s+\S+@\S+",                    # Forwarded message headers
+    ]
+    lines = body.splitlines()
+    clean_lines = []
+    for line in lines:
+        stripped = line.strip()
+        # Stop at quoted lines
+        if stripped.startswith(">"):
+            break
+        # Stop at quote-header patterns
+        if any(re.search(p, stripped, re.IGNORECASE) for p in cut_patterns):
+            break
+        clean_lines.append(line)
+    return "\n".join(clean_lines).strip()
+
 def classify(body: str) -> str:
     """
     Returns: "stop", "positive", or "neutral".
     Uses word-boundary regex to avoid false matches (e.g. "stopping" ≠ "stop").
     STOP is checked first — takes priority over positive.
+    Only classifies the fresh reply text — quoted original emails are stripped first.
     """
-    body_lower = body.lower()
+    body_lower = strip_quoted_text(body).lower()
 
     for kw in STOP_KEYWORDS:
         pattern = r"\b" + re.escape(kw) + r"\b"
