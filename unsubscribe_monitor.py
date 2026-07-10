@@ -18,7 +18,7 @@ import email.header
 import smtplib
 import logging
 import argparse
-from datetime import date
+from datetime import date, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -38,6 +38,10 @@ FROM_EMAIL = "romancereads@lulllitcloud.com"
 
 TRACKING_FILE     = "email_tracking.csv"
 UNSUBSCRIBED_FILE = "unsubscribed_emails.txt"
+MONITOR_STATE_FILE = "monitor_processed.txt"  # Message-IDs already handled
+
+# How many days back to scan (catches emails you've already opened)
+LOOKBACK_DAYS = 3
 
 TRACKING_FIELDS = [
     "email", "cohort_start",
@@ -299,6 +303,22 @@ def mark_complete(tracking: dict, sender_email: str):
         row["close_sent"]    = "1"
 
 # ============================================
+# PROCESSED IDs — monitor_processed.txt
+# ============================================
+
+def load_processed_ids() -> set:
+    """Load Message-IDs that have already been handled."""
+    if not os.path.exists(MONITOR_STATE_FILE):
+        return set()
+    with open(MONITOR_STATE_FILE, "r") as f:
+        return {line.strip() for line in f if line.strip()}
+
+def save_processed_id(message_id: str):
+    """Append one Message-ID to the processed log."""
+    with open(MONITOR_STATE_FILE, "a") as f:
+        f.write(message_id.strip() + "\n")
+
+# ============================================
 # UNSUBSCRIBED — unsubscribed_emails.txt
 # ============================================
 
@@ -368,23 +388,28 @@ def run(dry_run: bool = False):
     try:
         mail.select("INBOX")
 
-        # Fetch all UNSEEN message IDs
-        status, data = mail.search(None, "UNSEEN")
+        # Search ALL messages in the last LOOKBACK_DAYS days (read OR unread).
+        # This ensures replies you've manually opened are still processed.
+        since_str = (date.today() - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+        status, data = mail.search(None, f"SINCE {since_str}")
         if status != "OK":
-            log.warning("IMAP UNSEEN search returned non-OK status — exiting.")
+            log.warning("IMAP search returned non-OK status — exiting.")
             return
 
         msg_ids = data[0].split()
-        log.info(f"Unread messages found: {len(msg_ids)}")
+        log.info(f"Messages in last {LOOKBACK_DAYS} days: {len(msg_ids)}")
 
         if not msg_ids:
-            log.info("Inbox clear — nothing to process.")
+            log.info("No messages in lookback window — nothing to process.")
             return
 
+        # Load already-processed Message-IDs to prevent double-handling
+        processed_ids  = load_processed_ids()
         tracking       = load_tracking()
         tracking_dirty = False
 
         processed      = 0
+        skipped        = 0
         stop_count     = 0
         positive_count = 0
         neutral_count  = 0
@@ -399,25 +424,32 @@ def run(dry_run: bool = False):
             raw_email    = msg_data[0][1]
             msg          = email.message_from_bytes(raw_email)
 
+            # Use Message-ID header as unique dedup key
+            message_id   = (msg.get("Message-ID") or msg.get("Message-Id") or "").strip()
             from_header  = decode_header_value(msg.get("From", ""))
             sender_email = extract_sender_email(from_header)
             subject      = decode_header_value(msg.get("Subject", "(no subject)"))
             body         = extract_body(msg)
+
+            # Skip if already processed in a previous run
+            if message_id and message_id in processed_ids:
+                skipped += 1
+                continue
 
             log.info(f"Processing: from={sender_email} | subject={subject[:60]}")
 
             # Skip our own outbound messages landing in inbox
             if sender_email == FROM_EMAIL.lower():
                 log.info("Skipping — message is from our own address.")
-                if not dry_run:
-                    mail.store(msg_id, "+FLAGS", "\\Seen")
+                if message_id and not dry_run:
+                    save_processed_id(message_id)
                 continue
 
             # Skip automated / transactional senders (Brevo alerts, mailer-daemons, etc.)
             if is_automated(msg, sender_email):
                 log.info(f"Skipping — automated sender: {sender_email}")
-                if not dry_run:
-                    mail.store(msg_id, "+FLAGS", "\\Seen")
+                if message_id and not dry_run:
+                    save_processed_id(message_id)
                 continue
 
             # Classify the reply
@@ -444,9 +476,9 @@ def run(dry_run: bool = False):
                 log.info(f"NEUTRAL: {sender_email} — holding reply queued")
                 neutral_count += 1
 
-            # Mark message as read so it won't be re-processed on next run
-            if not dry_run:
-                mail.store(msg_id, "+FLAGS", "\\Seen")
+            # Record as processed so future runs skip it
+            if message_id and not dry_run:
+                save_processed_id(message_id)
 
             processed += 1
 
@@ -456,7 +488,7 @@ def run(dry_run: bool = False):
             log.info("email_tracking.csv saved.")
 
         log.info(
-            f"=== Run complete: processed={processed} | "
+            f"=== Run complete: processed={processed} | skipped(already handled)={skipped} | "
             f"stop={stop_count} | positive={positive_count} | neutral={neutral_count} ==="
         )
 

@@ -53,8 +53,8 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Touch optional files so git add never fails on a clean run
-          touch unsubscribed_emails.txt email_tracking.csv
-          git add unsubscribed_emails.txt email_tracking.csv
+          touch unsubscribed_emails.txt email_tracking.csv monitor_processed.txt
+          git add unsubscribed_emails.txt email_tracking.csv monitor_processed.txt
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "chore: monitor state update [skip ci]"
           # Retry loop — handles race condition if sender pushes at same moment
