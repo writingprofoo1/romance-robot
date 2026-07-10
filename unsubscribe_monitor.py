@@ -53,6 +53,44 @@ BREVO = {
 }
 
 # ============================================
+# AUTOMATED-SENDER BLOCKLIST
+# ============================================
+
+# Email address patterns that indicate automated / transactional senders.
+# We never reply to these — they're not real people.
+AUTOMATED_ADDRESS_PATTERNS = re.compile(
+    r"(noreply|no-reply|no\.reply|donotreply|do-not-reply|"
+    r"mailer-daemon|postmaster|bounce|bounces|"
+    r"notification|notifications|alert|alerts|"
+    r"support@.*brevo|account-alerts|t\.brevo\.com|"
+    r"mailjet\.com|sendinblue\.com)",
+    re.IGNORECASE,
+)
+
+def is_automated(msg, sender_email: str) -> bool:
+    """
+    Return True if the message appears to be from an automated system.
+    Checks sender address patterns AND standard email headers.
+    """
+    # Pattern match on the sender address itself
+    if AUTOMATED_ADDRESS_PATTERNS.search(sender_email):
+        return True
+
+    # Standard headers that automated mailers set
+    auto_submitted = msg.get("Auto-Submitted", "no")
+    if auto_submitted.lower() not in ("no", ""):
+        return True
+
+    precedence = msg.get("Precedence", "")
+    if precedence.lower() in ("bulk", "list", "junk"):
+        return True
+
+    if msg.get("X-Auto-Response-Suppress"):
+        return True
+
+    return False
+
+# ============================================
 # KEYWORD CLASSIFIERS
 # ============================================
 
@@ -368,9 +406,16 @@ def run(dry_run: bool = False):
 
             log.info(f"Processing: from={sender_email} | subject={subject[:60]}")
 
-            # Safety guard — skip our own outbound messages landing in inbox
+            # Skip our own outbound messages landing in inbox
             if sender_email == FROM_EMAIL.lower():
                 log.info("Skipping — message is from our own address.")
+                if not dry_run:
+                    mail.store(msg_id, "+FLAGS", "\\Seen")
+                continue
+
+            # Skip automated / transactional senders (Brevo alerts, mailer-daemons, etc.)
+            if is_automated(msg, sender_email):
+                log.info(f"Skipping — automated sender: {sender_email}")
                 if not dry_run:
                     mail.store(msg_id, "+FLAGS", "\\Seen")
                 continue
