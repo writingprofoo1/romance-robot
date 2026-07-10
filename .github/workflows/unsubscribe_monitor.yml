@@ -1,0 +1,62 @@
+name: Romance Robot Unsubscribe Monitor
+
+on:
+  workflow_dispatch:        # Phase 1 — manual trigger only for testing
+  # ── Phase 2 — uncomment after manual test passes ──────────────────────
+  # schedule:
+  #   - cron: "45 1 * * *"   # 02:45 WAT  (15 min after sender)
+  #   - cron: "45 5 * * *"   # 06:45 WAT
+  #   - cron: "45 9 * * *"   # 10:45 WAT
+  #   - cron: "45 13 * * *"  # 14:45 WAT
+  #   - cron: "45 17 * * *"  # 18:45 WAT
+  #   - cron: "45 21 * * *"  # 22:45 WAT
+
+concurrency:
+  group: romance-unsub-pipeline
+  cancel-in-progress: false  # never cancel mid-run
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for clean rebase on push
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Pull latest state before run
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+
+      - name: Run monitor
+        env:
+          ROMANCE_EMAIL:      ${{ secrets.ROMANCE_EMAIL }}
+          ROMANCE_EMAIL_PASS: ${{ secrets.ROMANCE_EMAIL_PASS }}
+          BREVO_USER:         ${{ secrets.BREVO_USER }}
+          BREVO_PASS:         ${{ secrets.BREVO_PASS }}
+        run: python unsubscribe_monitor.py
+
+      - name: Commit and push state files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Touch optional files so git add never fails on a clean run
+          touch unsubscribed_emails.txt email_tracking.csv
+          git add unsubscribed_emails.txt email_tracking.csv
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore: monitor state update [skip ci]"
+          # Retry loop — handles race condition if sender pushes at same moment
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin main && break
+            echo "Push attempt $i failed — retrying in 15s..."
+            sleep 15
+          done
