@@ -16,6 +16,9 @@ concurrency:
   group: romance-sender-pipeline
   cancel-in-progress: false  # never cancel a run mid-send
 
+permissions:
+  contents: write  # required for git push in commit step
+
 jobs:
   send:
     runs-on: ubuntu-latest
