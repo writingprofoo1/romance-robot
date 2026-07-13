@@ -71,10 +71,20 @@ AUTOMATED_ADDRESS_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Subject-line patterns that reveal automated / system messages even when
+# the sender address looks like a real person (OOO, delivery failures, ticket systems).
+AUTOMATED_SUBJECT_PATTERNS = re.compile(
+    r"(out of office|auto.?reply|automatic reply|"
+    r"undeliverable|delivery failure|delivery status|mail delivery failed|"
+    r"thank you for (your |)(email|message|reaching out|contacting)|"
+    r"\[ticket.?\d+\]|\bticket #\d+|case #\d+)",
+    re.IGNORECASE,
+)
+
 def is_automated(msg, sender_email: str) -> bool:
     """
     Return True if the message appears to be from an automated system.
-    Checks sender address patterns AND standard email headers.
+    Checks sender address patterns, standard email headers, and subject line.
     """
     # Pattern match on the sender address itself
     if AUTOMATED_ADDRESS_PATTERNS.search(sender_email):
@@ -90,6 +100,12 @@ def is_automated(msg, sender_email: str) -> bool:
         return True
 
     if msg.get("X-Auto-Response-Suppress"):
+        return True
+
+    # Subject-pattern fallback — catches ticket systems, OOO replies,
+    # delivery failures, and auto-acknowledgement emails from normal-looking addresses.
+    subject = msg.get("Subject", "")
+    if AUTOMATED_SUBJECT_PATTERNS.search(subject):
         return True
 
     return False
