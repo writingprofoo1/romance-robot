@@ -20,3 +20,5 @@
 <6a55d0af66769_21b199589a416427f5.sidekiq-frequent-fd-poduseast1-main3-green-5597ff4bfc-nclp6@notification.freshdesk.com>
 <a86915270f8a4a2fa85cdf16c45b8aa7@CP7P275MB2559.ZAFP275.PROD.OUTLOOK.COM>
 <08baa0857bad4ebca1fb4caf43cf9231@PH0PR08MB6536.namprd08.prod.outlook.com>
+<202607150618.46407073379@smtp-relay.mailin.fr>
+<5e867c57.AXAAAKGlP2kAAAAAAAAAAdzhe0AAAYCrSRAAAAAAAAuJSQBqV0lc@mailjet.com>
