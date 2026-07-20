@@ -87,7 +87,7 @@ Whether you prefer slow burns, second chances, or stories that make you laugh be
 
 We'd love for you to take a peek.
 
-To unsubscribe, reply with STOP.",1
+To unsubscribe, reply with STOP.",2
 8,Hook,For readers who can't put a book down,"Hey,
 
 Quick question: when's the last time a book completely took over your day?
@@ -150,7 +150,7 @@ Whether you prefer slow burns, second chances, or stories that make you laugh be
 
 We'd love for you to take a peek.
 
-To unsubscribe, reply with STOP.",1
+To unsubscribe, reply with STOP.",2
 13,Hook,"Bold, beautiful, and completely unputdownable","Hey,
 
 Quick question: when's the last time a book completely took over your day?
@@ -163,7 +163,7 @@ This week's pick is already doing exactly that.
 
 No pressure. Just a good story, waiting.
 
-To unsubscribe, reply with STOP.",1
+To unsubscribe, reply with STOP.",2
 14,Hook,This author just became my new favorite,"Hello,
 
 I'll keep this short.
@@ -326,7 +326,7 @@ If you're a reader who believes love stories deserve to be told brilliantly, you
 
 Take a look — I think you'll be glad you did.
 
-To unsubscribe, reply with STOP.",1
+To unsubscribe, reply with STOP.",2
 27,Hook,Your next favorite read is waiting,"Hello,
 
 Romance Reads exists because we believe love stories deserve a spotlight.
@@ -2822,7 +2822,7 @@ This week's feature is the kind of book that gets recommended friend to friend, 
 
 We think you'll understand why.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 225,Hook,You're going to want to clear your schedule,"Hi,
 
 Good books find their readers. We just help speed that up.
@@ -3098,7 +3098,7 @@ If you're a reader who believes love stories deserve to be told brilliantly, you
 
 Take a look — I think you'll be glad you did.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 247,Hook,The enemies-to-lovers arc that broke the internet,"Hello,
 
 Romance Reads exists because we believe love stories deserve a spotlight.
@@ -3111,7 +3111,7 @@ Whether you prefer slow burns, second chances, or stories that make you laugh be
 
 We'd love for you to take a peek.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 248,Hook,Second-chance love stories hit different,"Hey,
 
 Quick question: when's the last time a book completely took over your day?
@@ -5523,7 +5523,7 @@ That's the craft. That's what separates a slow burn that satisfies from one that
 
 This week's Romance Reads pick understands the difference intimately. We think it's one of the best-executed slow burns we've featured.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 428,Value,The one trope that never gets old (and why),"Hey,
 
 The enemies-to-lovers trope has been around forever. It will never stop working. Here's why:
@@ -5683,7 +5683,7 @@ Every title we feature, we feature without apology and with genuine enthusiasm.
 
 We'd love to share this week's pick with you.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 440,Value,Inside the world of BookTok romance recommendations,"Hi,
 
 A quick reading tip from us this week:
@@ -6029,7 +6029,7 @@ A well-crafted romance is one of the most reliable slump-breakers in fiction. It
 
 This week's Romance Reads feature is exactly that kind of book. Short enough to finish in a weekend. Good enough to think about for much longer.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 466,Value,How to build a romance reading list you'll actually finish,"Hi,
 
 Not every romance novel is created equal — and readers know it.
@@ -6059,7 +6059,7 @@ That's the craft. That's what separates a slow burn that satisfies from one that
 
 This week's Romance Reads pick understands the difference intimately. We think it's one of the best-executed slow burns we've featured.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 468,Value,Why diversity in romance matters — and where to find it,"Hey,
 
 The enemies-to-lovers trope has been around forever. It will never stop working. Here's why:
@@ -6085,7 +6085,7 @@ Every title we feature, we feature without apology and with genuine enthusiasm.
 
 We'd love to share this week's pick with you.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 470,Value,The overlooked sub-genre romance readers are discovering,"Hi,
 
 A quick reading tip from us this week:
@@ -6139,7 +6139,7 @@ We feature a lot of tropes at Romance Reads. But enemies-to-lovers remains the o
 
 This week's pick is a textbook example of why.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 474,Value,How to read more romance (without guilt or pressure),"Hello,
 
 Romance Reads was built on a simple premise: love stories deserve serious attention.
@@ -6152,7 +6152,7 @@ Every title we feature, we feature without apology and with genuine enthusiasm.
 
 We'd love to share this week's pick with you.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 475,Value,The community behind the books: romance readers online,"Hi,
 
 A quick reading tip from us this week:
@@ -7684,7 +7684,7 @@ That's the Romance Reads promise — not just good books, but books worth talkin
 
 We'd love for you to be part of that conversation.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 605,Follow-up,I wanted to follow up on something,"Hi,
 
 We don't follow up often. When we do, it's because something is worth it.
@@ -7923,7 +7923,7 @@ That's the crossover appeal we look for.
 
 Take another look when you get a moment. We think you'll be glad you did.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 626,Follow-up,Still thinking about that book I mentioned,"Hi,
 
 I wanted to follow up on the title we featured recently — because the reader response has been something else.
@@ -7936,7 +7936,7 @@ That's the kind of reaction we curate for.
 
 If you haven't had a chance to check it out yet, this might be the nudge you needed.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 627,Follow-up,Readers have been sharing their reactions — have you seen this?,"Hello,
 
 Here's something we don't say often: the community response to this week's feature has been one of the strongest we've seen.
@@ -8037,7 +8037,7 @@ That's the crossover appeal we look for.
 
 Take another look when you get a moment. We think you'll be glad you did.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 636,Follow-up,The discussion around this title is fascinating,"Hi,
 
 I wanted to follow up on the title we featured recently — because the reader response has been something else.
@@ -8118,7 +8118,7 @@ Re-reads are the highest compliment a romance reader can give.
 
 We wanted to pass that along in case you were still on the fence. This is the one people are talking about.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 643,Follow-up,The follow-up to our most-discussed feature,"Hey,
 
 Quick follow-up — and I'll keep it brief.
@@ -8164,7 +8164,7 @@ That's the kind of reaction we curate for.
 
 If you haven't had a chance to check it out yet, this might be the nudge you needed.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 647,Follow-up,The reaction to this title surprised even us,"Hello,
 
 Here's something we don't say often: the community response to this week's feature has been one of the strongest we've seen.
@@ -8221,7 +8221,7 @@ That's the kind of reaction we curate for.
 
 If you haven't had a chance to check it out yet, this might be the nudge you needed.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 652,Follow-up,Readers have been sharing their reactions — have you seen this?,"Hello,
 
 Here's something we don't say often: the community response to this week's feature has been one of the strongest we've seen.
@@ -8311,7 +8311,7 @@ That's the Romance Reads promise — not just good books, but books worth talkin
 
 We'd love for you to be part of that conversation.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 660,Follow-up,One more thing about the book we featured,"Hi,
 
 We don't follow up often. When we do, it's because something is worth it.
@@ -8322,7 +8322,7 @@ That's the crossover appeal we look for.
 
 Take another look when you get a moment. We think you'll be glad you did.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 661,Follow-up,The discussion around this title is fascinating,"Hi,
 
 I wanted to follow up on the title we featured recently — because the reader response has been something else.
@@ -8425,7 +8425,7 @@ That's the Romance Reads promise — not just good books, but books worth talkin
 
 We'd love for you to be part of that conversation.
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 670,Follow-up,We keep getting asked about this one,"Hi,
 
 We don't follow up often. When we do, it's because something is worth it.
@@ -9500,7 +9500,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 761,Close,We'd love your company in this community,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -9744,7 +9744,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 777,Close,One final recommendation before we move on,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -9775,7 +9775,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 779,Close,This is the last time we'll mention it,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -9820,7 +9820,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 782,Close,Thank you for your time — and one last note,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -9956,7 +9956,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 791,Close,This is the send that matters most,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -10003,7 +10003,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 794,Close,Saving the best thought for last,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10231,7 +10231,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 809,Close,A closing thought from Romance Reads,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10321,7 +10321,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 815,Close,One last story before we part ways,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -10352,7 +10352,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 817,Close,We'll leave you with this,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10428,7 +10428,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 822,Close,A warm goodbye and one last suggestion,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10444,7 +10444,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 823,Close,We hope you found something worth reading,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10488,7 +10488,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 826,Close,Last chance to join the conversation,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -10520,7 +10520,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 828,Close,We'd love to have you with us,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10580,7 +10580,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 832,Close,Thank you for your time — and one last note,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10596,7 +10596,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 833,Close,We won't keep you much longer,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10611,7 +10611,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 834,Close,A closing thought from Romance Reads,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10656,7 +10656,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 837,Close,Final note: this is worth your attention,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10672,7 +10672,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 838,Close,Closing out with something good,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10687,7 +10687,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 839,Close,The community is growing — and you're invited,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10701,7 +10701,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 840,Close,One last story before we part ways,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -10716,7 +10716,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 841,Close,This is the send that matters most,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -10732,7 +10732,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 842,Close,We'll leave you with this,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10748,7 +10748,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 843,Close,Our final word on this week's feature,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10763,7 +10763,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 844,Close,Saving the best thought for last,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10777,7 +10777,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 845,Close,We appreciate you reading — truly,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -10792,7 +10792,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 846,Close,Before this chapter closes,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -10808,7 +10808,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 847,Close,A warm goodbye and one last suggestion,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10824,7 +10824,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 848,Close,We hope you found something worth reading,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10839,7 +10839,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 849,Close,Thank you — and one final recommendation,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10853,7 +10853,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 850,Close,The last page of this particular story,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -10900,7 +10900,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 853,Close,We'd love to have you with us,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10915,7 +10915,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 854,Close,This is the last time we'll mention it,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -10929,7 +10929,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 855,Close,Wrapping up — and leaving you with this,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -10944,7 +10944,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 856,Close,Before we go: one more thing,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -10960,7 +10960,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 857,Close,Thank you for your time — and one last note,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -10976,7 +10976,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 858,Close,We won't keep you much longer,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -10991,7 +10991,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 859,Close,A closing thought from Romance Reads,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11005,7 +11005,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 860,Close,The last thing we'll say about this one,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11020,7 +11020,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 861,Close,We'd love your company in this community,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11036,7 +11036,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 862,Close,Final note: this is worth your attention,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11052,7 +11052,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 863,Close,Closing out with something good,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -11067,7 +11067,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 864,Close,The community is growing — and you're invited,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11081,7 +11081,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 865,Close,One last story before we part ways,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11096,7 +11096,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 866,Close,This is the send that matters most,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11112,7 +11112,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 867,Close,We'll leave you with this,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11143,7 +11143,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 869,Close,Saving the best thought for last,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11157,7 +11157,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 870,Close,We appreciate you reading — truly,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11172,7 +11172,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 871,Close,Before this chapter closes,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11188,7 +11188,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 872,Close,A warm goodbye and one last suggestion,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11204,7 +11204,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 873,Close,We hope you found something worth reading,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -11219,7 +11219,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 874,Close,Thank you — and one final recommendation,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11233,7 +11233,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 875,Close,The last page of this particular story,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11248,7 +11248,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 876,Close,Last chance to join the conversation,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11264,7 +11264,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 877,Close,One final recommendation before we move on,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11280,7 +11280,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 878,Close,We'd love to have you with us,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -11295,7 +11295,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 879,Close,This is the last time we'll mention it,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11309,7 +11309,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 880,Close,Wrapping up — and leaving you with this,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11324,7 +11324,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 881,Close,Before we go: one more thing,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11340,7 +11340,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 882,Close,Thank you for your time — and one last note,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11356,7 +11356,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 883,Close,We won't keep you much longer,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -11385,7 +11385,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 885,Close,The last thing we'll say about this one,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11416,7 +11416,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 887,Close,Final note: this is worth your attention,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11432,7 +11432,7 @@ Either way — thank you for reading. That means more than you know.
 Warmly,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 888,Close,Closing out with something good,"Hey,
 
 Here's our final thought on the book we've been sharing:
@@ -11447,7 +11447,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 889,Close,The community is growing — and you're invited,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11461,7 +11461,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 890,Close,One last story before we part ways,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11476,7 +11476,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 891,Close,This is the send that matters most,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11523,7 +11523,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 894,Close,Saving the best thought for last,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
@@ -11552,7 +11552,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 896,Close,Before this chapter closes,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11613,7 +11613,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 900,Close,The last page of this particular story,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11628,7 +11628,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 901,Close,Last chance to join the conversation,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11644,7 +11644,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 902,Close,One final recommendation before we move on,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11689,7 +11689,7 @@ There's always another great book around the corner. We'll be here when it arriv
 With appreciation,
 Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 905,Close,Wrapping up — and leaving you with this,"Hi,
 
 Final note. And then we promise we'll leave you in peace.
@@ -11704,7 +11704,7 @@ Take good care of yourself — and happy reading.
 
 — Romance Reads
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 906,Close,Before we go: one more thing,"Hi,
 
 This is our final note about the title we've been featuring — and we wanted to make it count.
@@ -11720,7 +11720,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 907,Close,Thank you for your time — and one last note,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11796,7 +11796,7 @@ We think it might be exactly what you needed.
 With warmth,
 The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 912,Close,Final note: this is worth your attention,"Hello,
 
 Last note from us — and then we'll let you be.
@@ -11827,7 +11827,7 @@ Thank you for having us in your inbox.
 
 — The Romance Reads Team
 
-To unsubscribe, reply with STOP.",0
+To unsubscribe, reply with STOP.",1
 914,Close,The community is growing — and you're invited,"Hello,
 
 We're wrapping up our feature on this title — and we wanted to close with gratitude.
